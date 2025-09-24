@@ -193,7 +193,7 @@ def load_dataset(task: str, force_rebuild: bool = False):
     """Load dataset for given task"""
     if task not in DATASET_LOADERS:
         raise ValueError(f"Unknown task: {task}")
-    return DATASET_LOADERS[task](force_rebuild, oracle=True)
+    return DATASET_LOADERS[task](force_rebuild)
 
 async def process_single_sample(sample, agent, output_file, task, semaphore):
     """Process a single sample asynchronously"""
