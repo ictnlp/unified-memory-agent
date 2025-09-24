@@ -19,6 +19,9 @@ python evaluate.py --task locomo --agent concat
 # Evaluate existing responses
 python evaluate.py --task locomo --input_file results/locomo/responses_concat_[timestamp].jsonl
 
+# Async version
+python evaluate_async.py --task longmemeval --agent concat --concurrency 256
+
 # Generate comprehensive statistics
 python generate_stats.py --task all --save_txt
 ```
