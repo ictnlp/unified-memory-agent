@@ -1,0 +1,10 @@
+smolagents
+prettytable
+openai
+backoff
+numpy
+regex
+nltk
+bert_score
+rouge
+sentence_transformers

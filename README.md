@@ -198,11 +198,3 @@ logging.basicConfig(level=logging.DEBUG)
 2. Create feature branch
 3. Add tests for new functionality
 4. Submit pull request
-
-## License
-
-[Add your license information here]
-
-## Contact
-
-For questions or issues, please open an issue on the repository or contact the development team.
