@@ -2,6 +2,6 @@ __pycache__/
 processed*
 .env
 .venv/
-processed*.json
 *.parquet
 raw/
+results/
