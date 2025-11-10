@@ -1,7 +1,7 @@
 import json
 import backoff
 from openai import RateLimitError
-from .base_agent import BaseAgent
+from .base_agent import BaseAgent, MODEL_NAME_MAP
 from typing import List, Union
 import tqdm
 
@@ -61,12 +61,20 @@ Your answer:
 
     def __init__(self, chunk_size: int = 5000, max_chunks: int = None, wo_q: bool = False, **kwargs):
         super().__init__(**kwargs)
-        self.chunk_size = chunk_size  # Size of each chunk in characters
-        self.max_chunks = max_chunks  # Maximum number of chunks to process
-        self.wo_q = wo_q  # Whether to use wo_q template
-        # Two versions of memory (both as strings)
-        self.concat_memory = ""  # Version 1: Direct concatenation
-        self.updated_memory = "No previous memory"  # Version 2: MemAgent-style updates
+        self.chunk_size = chunk_size
+        self.max_chunks = max_chunks
+        self.wo_q = wo_q
+        self.concat_memory = ""
+        self.updated_memory = "No previous memory"
+        self._is_async = self._check_if_async_client()
+
+    def reset(self) -> None:
+        self.concat_memory = ""
+        self.updated_memory = "No previous memory"
+    
+    def _check_if_async_client(self):
+        """Check if client is AsyncOpenAI"""
+        return hasattr(self.client, '__class__') and 'Async' in self.client.__class__.__name__
     
     def add_memory(self, chunk: str):
         """
@@ -178,11 +186,69 @@ Your answer:
         
         return memory
     
+    async def _process_memory_with_query_async(self, query: str) -> str:
+        """
+        Async version: Process concatenated memory using MemAgent approach with given query.
+        """
+        if not self.concat_memory:
+            return "No previous memory"
+        
+        # Split concatenated memory into processing chunks
+        processing_chunks = self._chunk_text(self.concat_memory)
+        
+        # Limit chunks if max_chunks is set
+        if self.max_chunks and len(processing_chunks) > self.max_chunks:
+            # Take first half and last half to stay within limit
+            half_limit = self.max_chunks // 2
+            processing_chunks = processing_chunks[:half_limit] + processing_chunks[-half_limit:]
+        
+        memory = "No previous memory"
+        
+        for i, chunk in enumerate(processing_chunks):
+            try:
+                prompt_text = self.MEMORY_UPDATE_TEMPLATE.format(
+                    prompt=query,
+                    memory=memory,
+                    chunk=chunk
+                )
+                
+                messages = [{"role": "user", "content": prompt_text}]
+                
+                # Update memory using LLM
+                response = await self._make_request_async(messages, max_tokens=2048)
+                memory = response.strip()
+                
+            except Exception as e:
+                print(f"Error updating memory in _process_memory_with_query_async (chunk {i+1}/{len(processing_chunks)}): {e}")
+                # Handle content filter and other API errors gracefully
+                error_message = self._handle_api_error(e, f"Query: {query[:50]}... Chunk: {chunk[:50]}...")
+                print(f"Memory processing failed: {error_message}")
+                # If memory update fails, fall back to concatenating chunk
+                if memory == "No previous memory":
+                    memory = f"[Memory processing failed due to API error] {chunk}"
+                else:
+                    memory += f"\n\n[Memory processing failed due to API error] {chunk}"
+        
+        return memory
+    
     @backoff.on_exception(backoff.expo, RateLimitError, max_tries=16, max_time=300)
     def _make_request(self, messages: List[dict], max_tokens: int = 1024, temperature: float = 0.0):
         """Make API request with retry logic"""
+        if self._is_async:
+            raise RuntimeError("Use _make_request_async() for async client")
         response = self.client.chat.completions.create(
-            model=self.model_name,
+            model=MODEL_NAME_MAP.get(self.model_name, self.model_name),
+            messages=messages,
+            max_tokens=max_tokens,
+            temperature=temperature
+        )
+        return response.choices[0].message.content
+    
+    @backoff.on_exception(backoff.expo, RateLimitError, max_tries=16, max_time=300)
+    async def _make_request_async(self, messages: List[dict], max_tokens: int = 1024, temperature: float = 0.0):
+        """Make async API request with retry logic"""
+        response = await self.client.chat.completions.create(
+            model=MODEL_NAME_MAP.get(self.model_name, self.model_name),
             messages=messages,
             max_tokens=max_tokens,
             temperature=temperature
@@ -220,7 +286,7 @@ Your answer:
         except Exception as e:
             return self._handle_api_error(e, query)
     
-    def QA_batch(self, queries: List[str], wo_q: bool = False) -> List[str]:
+    def QA_batch(self, queries: List[str], wo_q: bool = False, batch_size: int = 32) -> List[str]:
         """
         Answer multiple queries using memory.
         
@@ -228,13 +294,15 @@ Your answer:
             queries: List of questions to answer
             wo_q: If False, use query-aware memory processing
                   If True, use direct updated memory
+            batch_size: Not used, kept for compatibility
         """
+        if self._is_async:
+            raise RuntimeError("Use QA_batch_async() for async client")
+        
         try:
             if wo_q:
-                # For wo_q=True, use pre-built updated memory for all queries
                 memory_to_use = self.updated_memory
                 
-                # Process all queries with the same memory
                 responses = []
                 for query in queries:
                     prompt_text = self.FINAL_QA_TEMPLATE.format(
@@ -247,8 +315,6 @@ Your answer:
                 
                 return responses
             else:
-                # For query-aware processing, we can optimize by processing memory once
-                # for all queries (assuming they're related)
                 if not queries:
                     return []
                 
@@ -261,6 +327,52 @@ Your answer:
                     )
                     messages = [{"role": "user", "content": prompt_text}]
                     response = self._make_request(messages, max_tokens=1024)
+                    responses.append(response.strip())
+                
+                return responses
+                
+        except Exception as e:
+            error_msg = self._handle_api_error(e, f"Batch queries: {queries}")
+            return [error_msg] * len(queries)
+    
+    async def QA_batch_async(self, queries: List[str], wo_q: bool = False, batch_size: int = 32) -> List[str]:
+        """
+        Answer multiple queries using memory asynchronously.
+        
+        Args:
+            queries: List of questions to answer
+            wo_q: If False, use query-aware memory processing
+                  If True, use direct updated memory
+            batch_size: Not used, kept for compatibility
+        """
+        try:
+            if wo_q:
+                memory_to_use = self.updated_memory
+                
+                responses = []
+                for query in queries:
+                    prompt_text = self.FINAL_QA_TEMPLATE.format(
+                        prompt=query,
+                        memory=memory_to_use
+                    )
+                    messages = [{"role": "user", "content": prompt_text}]
+                    response = await self._make_request_async(messages, max_tokens=1024)
+                    responses.append(response.strip())
+                
+                return responses
+            else:
+                if not queries:
+                    return []
+                
+                responses = []
+                for query in queries:
+                    processed_memory = await self._process_memory_with_query_async(query)
+                    prompt_text = self.FINAL_QA_TEMPLATE.format(
+                        prompt=query,
+                        memory=processed_memory
+                    )
+                    messages = [{"role": "user", "content": prompt_text}]
+                    response = await self._make_request_async(messages, max_tokens=1024)
                     responses.append(response.strip())
                 
                 return responses

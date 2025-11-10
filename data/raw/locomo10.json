@@ -317,7 +317,8 @@
         "question": "What did Melanie paint recently?",
         "answer": "sunset",
         "evidence": [
-          "D8:6; D9:17"
+          "D8:6",
+          "D9:17"
         ],
         "category": 1
       },
@@ -17054,8 +17055,7 @@
           "D9:14",
           "D10:11",
           "D19:17",
-          "D27:23",
-          "D10:19"
+          "D27:23"
         ],
         "category": 1
       },
@@ -39272,7 +39272,6 @@
         "question": "What happened to John's job situation in 2022?",
         "answer": "quit his IT Job, secured his dream job, aspires to become an eSports competition organizer",
         "evidence": [
-          "D4:36",
           "D18:1",
           "D18:7"
         ],
@@ -54209,7 +54208,9 @@
         "question": "How might Evan and Sam's experiences with health and lifestyle changes influence their approach to stress and challenges?",
         "answer": "Their experiences likely lead them to view challenges as opportunities for growth and change. They both have embraced healthier lifestyles, indicating a proactive approach to managing stress and challenges.",
         "evidence": [
-          "D9:1 D4:4 D4:6"
+          "D9:1",
+          "D4:4",
+          "D4:6"
         ],
         "category": 3
       },
@@ -54276,7 +54277,10 @@
         "question": "What role does nature and the outdoors play in Evan and Sam's mental well-being?",
         "answer": "Nature and outdoor activities seem to be significant stress relievers and sources of joy for both Evan and Sam. These activities likely contribute positively to their mental well-being.",
         "evidence": [
-          "D22:1 D22:2 D9:10 D9:11"
+          "D22:1",
+          "D22:2",
+          "D9:10",
+          "D9:11"
         ],
         "category": 3
       },
@@ -54352,7 +54356,10 @@
         "question": "How do Evan and Sam use creative outlets to cope with life's challenges?",
         "answer": "Evan and Sam use creative activities, like painting and writing, as therapeutic tools to express themselves and cope with stress.",
         "evidence": [
-          "D21:18 D21:22 D11:15 D11:19"
+          "D21:18",
+          "D21:22",
+          "D11:15",
+          "D11:19"
         ],
         "category": 3
       },

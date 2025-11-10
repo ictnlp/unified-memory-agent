@@ -9,7 +9,8 @@ import os
 
 MODEL_NAME_MAP = {
     "gpt4.1": "azure-gpt-4_1",
-    "qwen3": "Qwen/Qwen3-8B"
+    "qwen3-8b": "Qwen/Qwen3-8B",
+    "qwen3-4b": "Qwen/Qwen3-4B-Instruct-2507",
 }
 
 class BaseAgent:
@@ -53,3 +54,13 @@ class BaseAgent:
         query: str
     ) -> str:
         raise NotImplementedError
+
+    def reset(self) -> None:
+        """Reset internal state between samples."""
+        # Default implementation does nothing; subclasses may override.
+        return None
+
+    def prepare_sample(self, sample) -> None:
+        """Optional hook to configure the agent before processing a sample."""
+        # Subclasses can override when sample-level context is required.
+        return None

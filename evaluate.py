@@ -245,11 +245,11 @@ def get_evaluator(task: str, scoring_client: OpenAI|None = None) -> BaseEvaluato
 
 def create_client():
     """Create OpenAI client with standard configuration"""
-    return OpenAI(**API_CONFIG)
+    return OpenAI(**API_CONFIG_LOCAL)
 
 def create_judge_client():
-    """Create OpenAI client with standard configuration"""
-    return OpenAI(**API_CONFIG_LOCAL)
+    """Create OpenAI client for judging"""
+    return OpenAI(**API_CONFIG)
 
 def load_dataset(task: str, force_rebuild: bool = False):
     """Load dataset for given task"""
@@ -275,14 +275,13 @@ def process_sample_subset(sample_subset, agent_class, agent_config, output_file_
             agent = agent_class(client=client, task_type=task_type, task_id=task_id)
         else:
             # Standard agent creation for other agent types
-            if 'wo_q' in agent_config:
-                agent = agent_class(wo_q=agent_config['wo_q'], client=client)
-                if agent_config['wo_q']:
-                    # Configure agent for wo_q mode
-                    original_qa_batch = agent.QA_batch
-                    agent.QA_batch = lambda queries: original_qa_batch(queries, wo_q=True)
-            else:
-                agent = agent_class(client=client)
+            agent_kwargs = dict(agent_config)
+            wo_q_setting = agent_kwargs.pop('wo_q', None)
+            agent = agent_class(client=client, **agent_kwargs)
+            if wo_q_setting:
+                # Configure agent for wo_q mode
+                original_qa_batch = agent.QA_batch
+                agent.QA_batch = lambda queries: original_qa_batch(queries, wo_q=True)
         
         # Generate unique output file for this process
         if process_id == 0 and "{process_id}" not in output_file_template:
@@ -299,6 +298,12 @@ def process_sample_subset(sample_subset, agent_class, agent_config, output_file_
         with open(output_file, file_mode, encoding='utf-8') as f:
             for sample_idx, sample in enumerate(sample_subset):
                 print(f"Process {process_id}: Processing sample {sample_idx + 1}/{len(sample_subset)}: {sample.task_id}")
+
+                # Reset agent state and provide sample context if supported
+                if hasattr(agent, "reset"):
+                    agent.reset()
+                if hasattr(agent, "prepare_sample"):
+                    agent.prepare_sample(sample)
                 
                 # Group questions by position
                 position_groups = {}
@@ -497,6 +502,12 @@ def get_agent_config(agent):
     agent_config = {}
     if hasattr(agent, 'wo_q'):
         agent_config['wo_q'] = getattr(agent, 'wo_q', False)
+    if hasattr(agent, '_agent_config_path') and getattr(agent, '_agent_config_path', None):
+        agent_config['agent_config_path'] = getattr(agent, '_agent_config_path')
+    if hasattr(agent, '_prompts_config_path') and getattr(agent, '_prompts_config_path', None):
+        agent_config['prompts_config_path'] = getattr(agent, '_prompts_config_path')
+    if hasattr(agent, '_agent_overrides') and getattr(agent, '_agent_overrides', None):
+        agent_config['agent_config'] = dict(getattr(agent, '_agent_overrides'))
     return agent_config
 
 def process_evaluation_subset(response_subset, task, output_file_template, process_id):
@@ -739,9 +750,13 @@ def evaluate_responses(input_file, task, output_dir, agent_id="unknown", num_pro
 
 def get_args():
     parser = argparse.ArgumentParser(description='Memory Agent Evaluation')
-    parser.add_argument('--task', type=str, choices=['locomo', 'longmemeval'], default='locomo')
-    parser.add_argument('--agent', type=str, choices=['concat', 'memagent', 'filememory', 'emergence'], default='concat')
+    parser.add_argument('--task', type=str, choices=['locomo', 'longmemeval', 'hotpotqa', 'msc', 'memalpha', 'trec_coarse', 'trec_fine', 'banking77', 'clinic', 'nlu', 'booksum', 'perltqa', 'pubmed_rct'], default='locomo')
+    parser.add_argument('--agent', type=str, choices=['concat', 'memagent', 'filememory', 'emergence', 'memalpha'], default='concat')
     parser.add_argument('--wo_q', action='store_true', help='Use wo_q mode for MemAgent')
+    parser.add_argument('--agent_config_path', type=str, default=None,
+                        help='Optional agent configuration file (used by memalpha agent)')
+    parser.add_argument('--prompts_config_path', type=str, default=None,
+                        help='Optional prompts configuration file for memalpha agent')
     parser.add_argument('--input_file', type=str, default=None,
                         help='Input file for evaluation only (JSONL format)')
     parser.add_argument('--output_dir', type=str, default=None,
@@ -775,6 +790,14 @@ def main():
                 agent_class = AGENT_CLASS[args.agent]
                 agent_config = {}
                 agent_id = args.agent
+            elif args.agent == 'memalpha':
+                agent_class = AGENT_CLASS[args.agent]
+                agent_id = args.agent
+                agent_config = {}
+                if args.agent_config_path:
+                    agent_config['agent_config_path'] = args.agent_config_path
+                if args.prompts_config_path:
+                    agent_config['prompts_config_path'] = args.prompts_config_path
             else:
                 agent_id = args.agent
                 agent_class = AGENT_CLASS[args.agent]

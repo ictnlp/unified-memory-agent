@@ -14,13 +14,13 @@ from datetime import datetime
 # Import dataset loaders
 import sys
 sys.path.append('.')
-from data.EvalDataset import load_locomo, load_longmemeval
+from data.EvalDataset import load_locomo, load_longmemeval, load_msc
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Generate evaluation statistics')
-    parser.add_argument('--results_dir', type=str, default='results',
+    parser.add_argument('--results_dir', type=str, default='results/qwen3-4b',
                         help='Results directory containing task subdirectories')
-    parser.add_argument('--task', type=str, choices=['locomo', 'longmemeval', 'all'], default='all',
+    parser.add_argument('--task', type=str, choices=['locomo', 'longmemeval', 'hotpotqa', 'msc', 'all'], default='all',
                         help='Task to generate statistics for')
     parser.add_argument('--save_txt', action='store_true',
                         help='Save statistics to txt file (default: False)')
@@ -90,15 +90,24 @@ def calculate_task_statistics(agent_results, task):
         
         # Calculate averages for overall metrics
         for metric_name, values in all_metrics.items():
-            agent_stats[f'{metric_name}_avg'] = sum(values) / len(values) if values else 0
-            agent_stats[f'{metric_name}_total'] = sum(values)
+            # If any value is -1, set average to -1
+            if any(v == -1 for v in values):
+                agent_stats[f'{metric_name}_avg'] = -1
+                agent_stats[f'{metric_name}_total'] = -1
+            else:
+                agent_stats[f'{metric_name}_avg'] = sum(values) / len(values) if values else 0
+                agent_stats[f'{metric_name}_total'] = sum(values)
         
         # Calculate category-specific averages
         agent_stats['categories'] = {}
         for category, category_metrics in category_stats.items():
             agent_stats['categories'][category] = {}
             for metric_name, values in category_metrics.items():
-                agent_stats['categories'][category][f'{metric_name}_avg'] = sum(values) / len(values) if values else 0
+                # If any value is -1, set average to -1
+                if any(v == -1 for v in values):
+                    agent_stats['categories'][category][f'{metric_name}_avg'] = -1
+                else:
+                    agent_stats['categories'][category][f'{metric_name}_avg'] = sum(values) / len(values) if values else 0
                 agent_stats['categories'][category][f'{metric_name}_count'] = len(values)
         
         stats[agent_name] = agent_stats
@@ -109,10 +118,14 @@ def build_qid_category_mapping(task):
     """Build mapping from qid to category from original dataset"""
     qid_to_category = {}
     
-    if task == 'locomo':
+    if task == 'hotpotqa':
+        return qid_to_category
+    elif task == 'locomo':
         eval_set = load_locomo()
     elif task == 'longmemeval':
         eval_set = load_longmemeval()
+    elif task == 'msc':
+        eval_set = load_msc()
     else:
         return qid_to_category
     
@@ -127,71 +140,85 @@ def generate_overall_table(stats, task):
     """Generate overall performance table"""
     if not stats:
         return None
-        
+
     table = PrettyTable()
     table.title = f"{task.upper()} - Overall Performance"
-    
+
     # Determine columns based on available metrics
-    agents = list(stats.keys())
+    agents = sorted(stats.keys())  # Sort agent names alphabetically
     if not agents:
         return None
-    
-    sample_stats = stats[agents[0]]
-    metric_columns = [col for col in sample_stats.keys() 
-                     if col.endswith('_avg') and 'categories' not in col]
-    
+
+    # Collect all unique metric columns from all agents
+    all_metric_columns = set()
+    for agent_stats in stats.values():
+        for col in agent_stats.keys():
+            if col.endswith('_avg') and 'categories' not in col:
+                all_metric_columns.add(col)
+
+    # Sort metric columns for consistent display
+    metric_columns = sorted(all_metric_columns)
+
     columns = ['Agent', 'Total Questions'] + [col.replace('_avg', '').upper() for col in metric_columns]
     table.field_names = columns
-    
-    for agent_name, agent_stats in stats.items():
+
+    for agent_name in agents:  # Iterate in sorted order
+        agent_stats = stats[agent_name]
         row = [agent_name, agent_stats['total_questions']]
         for metric_col in metric_columns:
-            value = agent_stats.get(metric_col, 0)
+            value = agent_stats.get(metric_col, -1)
             row.append(f"{value:.4f}")
         table.add_row(row)
-    
+
     return table
 
 def generate_category_table(stats, task):
     """Generate category-specific performance table"""
     if not stats:
         return None
-    
+
     # Collect all categories
     all_categories = set()
     for agent_stats in stats.values():
         all_categories.update(agent_stats.get('categories', {}).keys())
-    
+
     if not all_categories:
         return None
-    
+
     table = PrettyTable()
     table.title = f"{task.upper()} - Performance by Category"
-    
-    # Determine metric types
-    sample_agent = list(stats.keys())[0]
-    sample_category = list(all_categories)[0]
-    sample_category_stats = stats[sample_agent].get('categories', {}).get(sample_category, {})
-    metric_types = [col.replace('_avg', '') for col in sample_category_stats.keys() if col.endswith('_avg')]
-    
+
+    # Collect all unique metric types from all agents and categories
+    all_metric_types = set()
+    for agent_stats in stats.values():
+        for category_stats in agent_stats.get('categories', {}).values():
+            for col in category_stats.keys():
+                if col.endswith('_avg'):
+                    all_metric_types.add(col.replace('_avg', ''))
+
+    # Sort metric types for consistent display
+    metric_types = sorted(all_metric_types)
+
     if not metric_types:
         return None
-    
+
     # Create table with dynamic columns
     columns = ['Agent', 'Category', 'Count'] + [m.upper() for m in metric_types]
     table.field_names = columns
-    
-    for agent_name, agent_stats in stats.items():
-        categories = agent_stats.get('categories', {})
+
+    for agent_name in sorted(stats.keys()):  # Sort agent names
+        categories = stats[agent_name].get('categories', {})
         for category in sorted(all_categories):
             if category in categories:
                 cat_stats = categories[category]
-                row = [agent_name, str(category), cat_stats.get(f'{metric_types[0]}_count', 0)]
+                # Use first metric type to get count (all should have same count)
+                count = cat_stats.get(f'{metric_types[0]}_count', 0) if metric_types else 0
+                row = [agent_name, str(category), count]
                 for metric in metric_types:
-                    value = cat_stats.get(f'{metric}_avg', 0)
+                    value = cat_stats.get(f'{metric}_avg', -1)
                     row.append(f"{value:.4f}")
                 table.add_row(row)
-    
+
     return table
 
 def save_tables_to_file(tables, task, results_dir):
@@ -212,7 +239,7 @@ def save_tables_to_file(tables, task, results_dir):
 def main():
     args = parse_args()
     
-    tasks = ['locomo', 'longmemeval'] if args.task == 'all' else [args.task]
+    tasks = ['locomo', 'longmemeval', 'hotpotqa', 'msc'] if args.task == 'all' else [args.task]
     
     for task in tasks:
         print(f"\n{'='*60}")

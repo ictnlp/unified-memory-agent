@@ -1,10 +1,32 @@
 import json
 import os
+from typing import Callable
 from pydantic import BaseModel
 import random
+import pandas as pd
+
 CONV_START_PROMPT = "Below is a conversation between {} and {}.\n\n"
 
+MEMALPHA_PARQUET_PATH = "/mnt/pfs-guan-ssai/nlu/zhangkehao/Mem-alpha/data/memalpha/test.parquet"
+MEMORYAGENTBENCH_PARQUET_PATH = "/mnt/pfs-guan-ssai/nlu/zhangkehao/Mem-alpha/data/memoryagentbench/test.parquet"
+
+BenchmarkRegistry = dict[str, Callable[..., list["EvalData"]]]
+BENCHMARK_REGISTRY: BenchmarkRegistry = {}
+
+
+def register_benchmark(name: str | None = None) -> Callable[[Callable[..., list["EvalData"]]], Callable[..., list["EvalData"]]]:
+    """Decorator to register benchmark loaders for easy discovery."""
+    def decorator(func: Callable[..., list["EvalData"]]) -> Callable[..., list["EvalData"]]:
+        key = name or func.__name__.removeprefix("load_")
+        BENCHMARK_REGISTRY[key] = func
+        return func
+
+    return decorator
+
 random.seed(114514)
+
+# Set HuggingFace cache directory for MSC dataset loading
+os.environ['HF_HOME'] = '/mnt/pfs-guan-ssai/nlu/zhangkehao/.cache/huggingface'
 
 class Question(BaseModel):
     qid: str|None = None
@@ -18,6 +40,147 @@ class EvalData(BaseModel):
     questions: list[Question]
     chunks: list[str]
 
+
+def _parse_chunks(raw_chunks) -> list[str]:
+    if isinstance(raw_chunks, str):
+        try:
+            chunk_entries = json.loads(raw_chunks)
+        except json.JSONDecodeError:
+            chunk_entries = []
+    elif isinstance(raw_chunks, (list, tuple)):
+        chunk_entries = list(raw_chunks)
+    else:
+        chunk_entries = []
+
+    chunks: list[str] = []
+    for chunk in chunk_entries:
+        if isinstance(chunk, str):
+            chunks.append(chunk)
+        else:
+            chunks.append(json.dumps(chunk, ensure_ascii=False))
+    return chunks
+
+
+def _parse_qa_pairs(raw_field) -> list:
+    if isinstance(raw_field, str):
+        try:
+            return json.loads(raw_field)
+        except json.JSONDecodeError:
+            return []
+    if isinstance(raw_field, (list, tuple)):
+        return list(raw_field)
+    return []
+
+
+def _resolve_identifier(row, candidates: list[str], fallback: str) -> str:
+    for key in candidates:
+        if key is None:
+            continue
+        value = row.get(key)
+        if value is None or (isinstance(value, float) and pd.isna(value)):
+            continue
+        value_str = str(value).strip()
+        if value_str:
+            return value_str
+    return fallback
+
+
+def _extract_question_answer(qa_pair) -> tuple[str, str]:
+    question_text = ""
+    answer_value: str | list | tuple | None = ""
+
+    if isinstance(qa_pair, dict):
+        question_text = qa_pair.get("question", "")
+        answer_value = qa_pair.get("answer", qa_pair.get("answers", ""))
+    elif isinstance(qa_pair, (list, tuple)):
+        if len(qa_pair) >= 3:
+            question_text = qa_pair[1]
+            answer_value = qa_pair[2]
+        elif len(qa_pair) >= 2:
+            question_text = qa_pair[0]
+            answer_value = qa_pair[1]
+
+    if isinstance(answer_value, (list, tuple)):
+        answer_text = ", ".join(str(x) for x in answer_value)
+    else:
+        answer_text = str(answer_value or "")
+
+    return str(question_text or ""), answer_text
+
+
+def _build_evaldata(df: pd.DataFrame, *, id_keys: list[str], task_prefix: str, default_source: str) -> list[EvalData]:
+    processed: list[EvalData] = []
+
+    for row_idx, row in df.iterrows():
+        chunks = _parse_chunks(row.get("chunks"))
+        qa_pairs = _parse_qa_pairs(row.get("questions_and_answers"))
+
+        base_id = _resolve_identifier(row, id_keys, fallback=str(row_idx))
+        task_id = f"{task_prefix}_{base_id}"
+
+        data_source_raw = row.get("data_source", default_source)
+        if data_source_raw is None or (isinstance(data_source_raw, float) and pd.isna(data_source_raw)):
+            data_source_raw = default_source
+        data_source = str(data_source_raw)
+
+        final_position = max(len(chunks) - 1, 0)
+        questions: list[Question] = []
+
+        for q_idx, qa_pair in enumerate(qa_pairs):
+            question_text, answer_text = _extract_question_answer(qa_pair)
+            if not question_text:
+                continue
+
+            questions.append(Question(
+                qid=f"{task_id}_{q_idx}",
+                query=question_text,
+                answer=answer_text,
+                position=final_position,
+                category=data_source
+            ))
+
+        processed.append(EvalData(
+            task_id=task_id,
+            questions=questions,
+            chunks=chunks
+        ))
+
+    return processed
+
+
+def _load_parquet_subset(
+    *,
+    parquet_path: str,
+    cache_path: str,
+    data_source_value: str,
+    task_prefix: str,
+    default_source: str,
+    id_keys: list[str],
+    force_rebuild: bool,
+) -> list[EvalData]:
+    if os.path.exists(cache_path) and not force_rebuild:
+        processed_dataset = json.load(open(cache_path))
+        return [EvalData(**data) for data in processed_dataset]
+
+    if not os.path.exists(parquet_path):
+        raise FileNotFoundError(f"Source parquet file not found: {parquet_path}")
+
+    df = pd.read_parquet(parquet_path)
+    subset = df[df["data_source"] == data_source_value]
+    if subset.empty:
+        raise ValueError(f"No entries found for data_source '{data_source_value}'")
+
+    processed = _build_evaldata(
+        subset,
+        id_keys=id_keys,
+        task_prefix=task_prefix,
+        default_source=default_source
+    )
+
+    json.dump([item.model_dump() for item in processed], open(cache_path, "w"), indent=4, ensure_ascii=False)
+    return processed
+
+@register_benchmark()
 def load_locomo(force_rebuild=False):
     # 有五类QA
     # 1. multi hop
@@ -92,6 +255,7 @@ def load_locomo(force_rebuild=False):
     json.dump([item.model_dump() for item in processed], open(file_path, "w"), indent=4, ensure_ascii=False)
     return processed
 
+@register_benchmark()
 def load_longmemeval(force_rebuild=False, oracle=False):
     file_path = "data/processed_longmemeval_oracle.json" if oracle else "data/processed_longmemeval.json"
     if os.path.exists(file_path) and not force_rebuild:
@@ -165,7 +329,8 @@ def load_longmemeval(force_rebuild=False, oracle=False):
     json.dump([item.model_dump() for item in processed], open(file_path, "w"), indent=4, ensure_ascii=False)
     return processed
 
-def load_hotpotqa(force_rebuild=False, num_docs: int=200, num_queries: int=5, num_samples: int=100):
+def load_hotpotqa_deprecated(force_rebuild=False, num_docs: int=200, num_queries: int=5, num_samples: int=100):
+    """Deprecated: Old HotpotQA loader using HuggingFace dataset"""
     file_path = f"data/processed_hotpotqa_{num_docs}_{num_queries}_{num_samples}.json"
     if os.path.exists(file_path) and not force_rebuild:
         processed_dataset = json.load(open(file_path))
@@ -288,11 +453,330 @@ def load_hotpotqa(force_rebuild=False, num_docs: int=200, num_queries: int=5, nu
     json.dump([item.model_dump() for item in processed], open(file_path, "w"), indent=4, ensure_ascii=False)
     return processed
 
+@register_benchmark()
+def load_hotpotqa(force_rebuild=False, num_docs: int=200, num_queries: int=1, num_samples: int=128):
+    """
+    Load HotpotQA data from MemAgent_minimal format
+    
+    Args:
+        force_rebuild: Force rebuild cached data
+        num_docs: Number of documents (50, 100, 200, 400, 800, 1600, 3200, 6400, 12800, 25600, 51200)
+        num_queries: Number of queries per sample (fixed at 1 for this format)
+        num_samples: Number of samples (fixed at 128 for this format)
+    """
+    # Fixed values
+    num_queries = 1
+    num_samples = 128
+    
+    file_path = f"data/processed_hotpotqa_{num_docs}.json"
+    if os.path.exists(file_path) and not force_rebuild:
+        processed_dataset = json.load(open(file_path))
+        return [EvalData(**data) for data in processed_dataset]
+    
+    # Load source data
+    source_file = f"/mnt/pfs-guan-ssai/nlu/zhangkehao/MemAgent_minimal/data/taskutils/memory_data/eval_{num_docs}.json"
+    if not os.path.exists(source_file):
+        raise FileNotFoundError(f"Source file not found: {source_file}. Valid num_docs: 50, 100, 200, 400, 800, 1600, 3200, 6400, 12800, 25600, 51200")
+    
+    raw = json.load(open(source_file))
+    processed = []
+    
+    for item in raw:
+        # Extract fields
+        context = item['context']  # Full context with all documents
+        question = item['input']
+        answers = item['answers']  # List of valid answers
+        index = item['index']
+        actual_num_docs = item['num_docs']
+        
+        # Parse context into chunks (split by "Document N:")
+        chunks = []
+        doc_parts = context.split('\nDocument ')
+        
+        # First part is "Document 1:..."
+        if doc_parts[0].startswith('Document '):
+            chunks.append(doc_parts[0].strip())
+        
+        # Rest are "N:..."
+        for part in doc_parts[1:]:
+            chunks.append(f'Document {part.strip()}')
+        
+        # Create single question at the end (after all documents)
+        questions = [
+            Question(
+                qid=f"hotpotqa_{num_docs}_{index}",
+                query=question,
+                answer=answers[0] if answers else "",  # Use first answer
+                position=len(chunks) - 1,  # Ask at the end
+                category='qa'
+            )
+        ]
+        
+        evaldata = EvalData(
+            task_id=f"hotpotqa_{num_docs}_{index}",
+            questions=questions,
+            chunks=chunks
+        )
+        processed.append(evaldata)
+    
+    # Save processed data
+    json.dump([item.model_dump() for item in processed], open(file_path, "w"), indent=4, ensure_ascii=False)
+    return processed
+
+
+@register_benchmark()
+def load_memalpha(force_rebuild: bool = False) -> list[EvalData]:
+    """Load MemAlpha benchmark data into EvalData format."""
+    file_path = "data/processed_memalpha.json"
+    if os.path.exists(file_path) and not force_rebuild:
+        processed_dataset = json.load(open(file_path))
+        return [EvalData(**data) for data in processed_dataset]
+
+    if not os.path.exists(MEMALPHA_PARQUET_PATH):
+        raise FileNotFoundError(f"MemAlpha source file not found: {MEMALPHA_PARQUET_PATH}")
+
+    df = pd.read_parquet(MEMALPHA_PARQUET_PATH)
+    processed = _build_evaldata(
+        df,
+        id_keys=["instance_id"],
+        task_prefix="memalpha",
+        default_source="memalpha"
+    )
+
+    json.dump([item.model_dump() for item in processed], open(file_path, "w"), indent=4, ensure_ascii=False)
+    return processed
+
+
+@register_benchmark()
+def load_trec_coarse(force_rebuild: bool = False) -> list[EvalData]:
+    """Load TREC-Coarse subset from MemoryAgentBench into EvalData format."""
+    return _load_parquet_subset(
+        parquet_path=MEMORYAGENTBENCH_PARQUET_PATH,
+        cache_path="data/processed_trec_coarse.json",
+        data_source_value="icl_trec_coarse_6600shot_balance",
+        task_prefix="trec_coarse",
+        default_source="trec_coarse",
+        id_keys=["instance_id"],
+        force_rebuild=force_rebuild,
+    )
+
+
+@register_benchmark()
+def load_banking77(force_rebuild: bool = False) -> list[EvalData]:
+    """Load Banking77 subset from MemoryAgentBench into EvalData format."""
+    return _load_parquet_subset(
+        parquet_path=MEMORYAGENTBENCH_PARQUET_PATH,
+        cache_path="data/processed_banking77.json",
+        data_source_value="icl_banking77_5900shot_balance",
+        task_prefix="banking77",
+        default_source="banking77",
+        id_keys=["instance_id"],
+        force_rebuild=force_rebuild,
+    )
+
+
+@register_benchmark()
+def load_clinic(force_rebuild: bool = False) -> list[EvalData]:
+    """Load Clinic150 subset from MemoryAgentBench into EvalData format."""
+    return _load_parquet_subset(
+        parquet_path=MEMORYAGENTBENCH_PARQUET_PATH,
+        cache_path="data/processed_clinic.json",
+        data_source_value="icl_clinic150_7050shot_balance",
+        task_prefix="clinic",
+        default_source="clinic",
+        id_keys=["instance_id"],
+        force_rebuild=force_rebuild,
+    )
+
+
+@register_benchmark()
+def load_nlu(force_rebuild: bool = False) -> list[EvalData]:
+    """Load NLU subset from MemoryAgentBench into EvalData format."""
+    return _load_parquet_subset(
+        parquet_path=MEMORYAGENTBENCH_PARQUET_PATH,
+        cache_path="data/processed_nlu.json",
+        data_source_value="icl_nlu_8296shot_balance",
+        task_prefix="nlu",
+        default_source="nlu",
+        id_keys=["instance_id"],
+        force_rebuild=force_rebuild,
+    )
+
+
+@register_benchmark()
+def load_trec_fine(force_rebuild: bool = False) -> list[EvalData]:
+    """Load TREC-Fine subset from MemoryAgentBench into EvalData format."""
+    return _load_parquet_subset(
+        parquet_path=MEMORYAGENTBENCH_PARQUET_PATH,
+        cache_path="data/processed_trec_fine.json",
+        data_source_value="icl_trec_fine_6400shot_balance",
+        task_prefix="trec_fine",
+        default_source="trec_fine",
+        id_keys=["instance_id"],
+        force_rebuild=force_rebuild,
+    )
+
+
+@register_benchmark()
+def load_booksum(force_rebuild: bool = False) -> list[EvalData]:
+    """Load BookSum subset from MemAlpha into EvalData format."""
+    return _load_parquet_subset(
+        parquet_path=MEMALPHA_PARQUET_PATH,
+        cache_path="data/processed_booksum.json",
+        data_source_value="booksum",
+        task_prefix="booksum",
+        default_source="booksum",
+        id_keys=["instance_id"],
+        force_rebuild=force_rebuild,
+    )
+
+
+@register_benchmark()
+def load_perltqa(force_rebuild: bool = False) -> list[EvalData]:
+    """Load PerLTQA subset from MemAlpha into EvalData format."""
+    return _load_parquet_subset(
+        parquet_path=MEMALPHA_PARQUET_PATH,
+        cache_path="data/processed_perltqa.json",
+        data_source_value="perltqa",
+        task_prefix="perltqa",
+        default_source="perltqa",
+        id_keys=["instance_id"],
+        force_rebuild=force_rebuild,
+    )
+
+
+@register_benchmark()
+def load_pubmed_rct(force_rebuild: bool = False) -> list[EvalData]:
+    """Load PubMed-RCT subset from MemAlpha into EvalData format."""
+    return _load_parquet_subset(
+        parquet_path=MEMALPHA_PARQUET_PATH,
+        cache_path="data/processed_pubmed_rct.json",
+        data_source_value="pubmed-rct",
+        task_prefix="pubmed_rct",
+        default_source="pubmed-rct",
+        id_keys=["instance_id"],
+        force_rebuild=force_rebuild,
+    )
+
+
+@register_benchmark()
+def load_msc(force_rebuild=False, batch_size=5):
+    """
+    Load MSC-Self-Instruct dataset and optionally merge samples into larger batches.
+    
+    Structure per base sample:
+    - 500 samples from Session 5 conversations
+    - Each sample has 5 sessions total (previous 4 in previous_dialogs + current session 5 in dialog)
+    - Chunks: Each session as one chunk (5 chunks total)
+    - Questions: self_instruct QA pairs asked at position 4 (after all 5 sessions)
+    
+    Args:
+        force_rebuild: skip cached JSON
+        batch_size: number of base samples to merge into one EvalData record
+    """
+    if batch_size < 1:
+        raise ValueError("batch_size must be >= 1")
+
+    suffix = "" if batch_size == 1 else f"_batch{batch_size}"
+    file_path = f"data/processed_msc{suffix}.json"
+    if os.path.exists(file_path) and not force_rebuild:
+        processed_dataset = json.load(open(file_path))
+        return [EvalData(**data) for data in processed_dataset]
+    
+    from datasets import load_dataset
+    raw = load_dataset("MemGPT/MSC-Self-Instruct", split="train")
+    
+    base_samples = []
+    
+    for idx, item in enumerate(raw):
+        task_id = f"msc_{item['metadata']['initial_data_id']}"
+        
+        # Build chunks from all sessions
+        chunks = []
+        
+        # Process previous dialogs (Sessions 1-4)
+        for prev_dialog in item['previous_dialogs']:
+            session_conv = ""
+            for turn in prev_dialog['dialog']:
+                # Determine speaker (alternating, starting with Speaker 1)
+                turn_idx = prev_dialog['dialog'].index(turn)
+                speaker = "Speaker 1" if turn_idx % 2 == 0 else "Speaker 2"
+                session_conv += f'{speaker} said, "{turn["text"]}"\n'
+            
+            chunks.append(session_conv.strip())
+        
+        # Process current dialog (Session 5)
+        session_conv = ""
+        for turn in item['dialog']:
+            speaker = turn['id']  # Already has 'Speaker 1' or 'Speaker 2'
+            session_conv += f'{speaker} said, "{turn["text"]}"\n'
+        
+        chunks.append(session_conv.strip())
+        
+        # Create question from self_instruct
+        question = Question(
+            qid=f"msc_{item['metadata']['initial_data_id']}_{idx}",
+            query=item['self_instruct']['B'],
+            answer=item['self_instruct']['A'],
+            position=4,  # Ask after all 5 sessions (0-indexed, so position 4 = after chunk 4)
+            category='memory-recall'
+        )
+        
+        base_samples.append(EvalData(
+            task_id=task_id,
+            questions=[question],
+            chunks=chunks
+        ))
+
+    if batch_size == 1:
+        processed = base_samples
+    else:
+        processed = []
+        for batch_index, start in enumerate(range(0, len(base_samples), batch_size)):
+            batch = base_samples[start:start + batch_size]
+            combined_chunks = []
+            combined_questions = []
+            chunk_offset = 0
+
+            for sample in batch:
+                combined_chunks.extend(sample.chunks)
+                for q in sample.questions:
+                    combined_questions.append(Question(
+                        qid=q.qid,
+                        query=q.query,
+                        answer=q.answer,
+                        position=q.position + chunk_offset,
+                        category=q.category
+                    ))
+                chunk_offset += len(sample.chunks)
+
+            batch_task_id = f"msc_batch_{batch_index}_{batch[0].task_id}_to_{batch[-1].task_id}"
+            processed.append(EvalData(
+                task_id=batch_task_id,
+                questions=combined_questions,
+                chunks=combined_chunks
+            ))
+
+    # Save processed data
+    json.dump([item.model_dump() for item in processed], open(file_path, "w"), indent=4, ensure_ascii=False)
+    return processed
+
+
+AVAILABLE_BENCHMARKS = sorted(BENCHMARK_REGISTRY)
+print(f"[EvalDataset] Registered benchmarks: {', '.join(AVAILABLE_BENCHMARKS)}")
+# banking77, booksum, clinic, hotpotqa, locomo, longmemeval, memalpha, msc, nlu, perltqa, pubmed_rct, trec_coarse, trec_fine
 
 if __name__ == '__main__':
     # locomo = load_locomo(True)
     # longmemeval = load_longmemeval(True)
-    hotpotqa = load_hotpotqa(True, num_docs=10, num_queries=3, num_samples=5)  # Small test
-    print(f"Loaded {len(hotpotqa)} HotpotQA samples")
-    if hotpotqa:
-        print(f"Sample: {hotpotqa[0].task_id}, Questions: {len(hotpotqa[0].questions)}, Chunks: {len(hotpotqa[0].chunks)}")
+    # hotpotqa = load_hotpotqa(True, num_docs=10, num_queries=3, num_samples=5)  # Small test
+    test_data = load_banking77(True)
+    # test_data = load_trec_coarse(True)
+    if test_data:
+        sample = test_data[0]
+        print(f"Sample: {sample.task_id}, Questions: {len(sample.questions)}, Chunks: {len(sample.chunks)}")
+        if sample.questions:
+            print(f"Question: {sample.questions[0].query}")
+            print(f"Answer: {sample.questions[0].answer}")
+        if sample.chunks:
+            print(f"Chunk 0 preview: {sample.chunks[0][:200]}...")

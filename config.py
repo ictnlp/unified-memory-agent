@@ -1,7 +1,21 @@
-from agents import BaseAgent, ConcatAgent, MemAgent
+from agents import BaseAgent, ConcatAgent, MemAgent, MemAlphaUnifiedAgent
 from agents.file_memory_agent import FileMemoryAgent
 from agents.emergence_agent import EmergenceAgent
-from data.EvalDataset import load_locomo, load_longmemeval, load_hotpotqa
+from data.EvalDataset import (
+    load_locomo,
+    load_longmemeval,
+    load_hotpotqa,
+    load_msc,
+    load_memalpha,
+    load_trec_coarse,
+    load_banking77,
+    load_clinic,
+    load_nlu,
+    load_trec_fine,
+    load_booksum,
+    load_perltqa,
+    load_pubmed_rct,
+)
 import uuid
 from functools import partial
 
@@ -31,11 +45,22 @@ API_CONFIG_LOCAL = {
 MODEL_NAME = "Qwen/Qwen3-8B"
 
 load_hotpotqa_10_3_5 = partial(load_hotpotqa, num_docs=10, num_queries=3, num_samples=5)
+load_hotpotqa_200_1_128 = partial(load_hotpotqa, num_docs=200, num_queries=1, num_samples=128)
 
 _DATASET_LOADERS = {
     'locomo': load_locomo,
     'longmemeval': load_longmemeval, 
-    'hotpotqa': load_hotpotqa_10_3_5
+    'hotpotqa': load_hotpotqa_200_1_128,
+    'msc': load_msc,
+    'memalpha': load_memalpha,
+    'trec_coarse': load_trec_coarse,
+    'trec_fine': load_trec_fine,
+    'banking77': load_banking77,
+    'clinic': load_clinic,
+    'nlu': load_nlu,
+    'booksum': load_booksum,
+    'perltqa': load_perltqa,
+    'pubmed_rct': load_pubmed_rct,
 }
 
 class DatasetLoaders:
@@ -62,5 +87,6 @@ AGENT_CLASS = {
     'concat': ConcatAgent,
     'memagent': MemAgent,
     'filememory': FileMemoryAgent,
-    'emergence': EmergenceAgent
+    'emergence': EmergenceAgent,
+    'memalpha': MemAlphaUnifiedAgent,
 }
