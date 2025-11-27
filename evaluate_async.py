@@ -12,11 +12,10 @@ from pathlib import Path
 import argparse
 from datetime import datetime
 import backoff
-from abc import ABC, abstractmethod
 import regex
 import string
 import unicodedata
-from collections import Counter
+from collections import Counter, defaultdict
 from rouge_score import rouge_scorer
 import asyncio
 from tqdm.asyncio import tqdm as atqdm
@@ -29,14 +28,15 @@ try:
 except ImportError:
     pass
 
-from config import DATASET_LOADERS, AGENT_CLASS, MODEL_NAME, JUDGE_MODEL_NAME, API_CONFIG, API_CONFIG_LOCAL
+from config import DATASET_LOADERS, AGENT_CLASS, API_CONFIG_LOCAL
 
-API_CONFIG = API_CONFIG_LOCAL
-# JUDGE_MODEL_NAME = MODEL_NAME
-# JUDGE_MODEL_NAME = "Qwen/Qwen3-4B-Instruct-2507"
+#如果存在环境变量OPENAI_API_BASE
+if 'OPENAI_API_BASE' in os.environ:
+    API_CONFIG_LOCAL['base_url'] = os.environ['OPENAI_API_BASE']
+
 JUDGE_MODEL_NAME = "Qwen/Qwen3-30B-A3B-Instruct-2507"
 
-class BaseEvaluator(ABC):
+class BaseEvaluator:
     """Base class for task-specific evaluators"""
     LLM_TEMPLATE = "I will give you a question, a correct answer, and a response from a model. Please answer yes if the response contains the correct answer. Otherwise, answer no. If the response is equivalent to the correct answer or contains all the intermediate steps to get the correct answer, you should also answer yes. If the response only contains a subset of the information required by the answer, answer no.\n\nQuestion: {}\n\nCorrect Answer: {}\n\nModel Response: {}\n\nIs the model response correct? Answer yes or no only."
     # Class-level singleton for bert_score model components
@@ -45,11 +45,12 @@ class BaseEvaluator(ABC):
     _bert_lock = None
     _bert_available = True
     
-    def __init__(self):
+    def __init__(self, scoring_client: OpenAI = None):
         self.qid_category_map = {}
         self.scoring_client: Optional[AsyncOpenAI] = None
         # Pre-initialize ROUGE scorer; use stemmer-enabled tokenizer for consistency with Porter stemming
         self._rouge_scorer = rouge_scorer.RougeScorer(["rougeL"], use_stemmer=True)
+        self.scoring_client = scoring_client
 
     @backoff.on_exception(backoff.expo, RateLimitError, max_tries=16, max_time=300, jitter=backoff.full_jitter)
     async def _llm_scoring_response(self, messages, model_name=JUDGE_MODEL_NAME):
@@ -267,24 +268,14 @@ class BaseEvaluator(ABC):
             print(f"Error in LLM scoring for qid {qid}: {exc}")
             return -1.0
 
-    @abstractmethod
-    async def evaluate_qa(self, qid: str, query: str, expected_answer: str, response: str) -> dict:
-        """Evaluate a single QA pair and return metrics dictionary"""
-        pass
-
-class LocomoEvaluator(BaseEvaluator):
-    """Async Evaluator for Locomo dataset"""
-    
-    def __init__(self, scoring_client: OpenAI):
-        super().__init__()
-        self.scoring_client = scoring_client
-    
-    async def evaluate_qa(self, qid: str, query: str, expected_answer: str, response: str) -> dict:
+    async def evaluate_qa(self, qid: str, query: str, expected_answer: str, response: str, existing_metrics: dict = None) -> dict:
+        existing_metrics = existing_metrics or {}
         metrics: Dict[str, float] = {}
         try:
             response_text = str(response)
             expected_text = str(expected_answer)
-            
+
+            # Token metrics - always recompute (cheap)
             token_metrics = await self._token_metrics(
                 qid,
                 response_text,
@@ -293,55 +284,29 @@ class LocomoEvaluator(BaseEvaluator):
             )
             metrics.update(token_metrics)
 
-            metrics['bert_score'] = await self._bert_metric(qid, response_text, expected_text)
+            # BERT score - skip if already computed (expensive)
+            if 'bert_score' in existing_metrics and existing_metrics['bert_score'] != -1:
+                metrics['bert_score'] = existing_metrics['bert_score']
+                print(f"Reusing bert_score for qid {qid}")
+            else:
+                metrics['bert_score'] = await self._bert_metric(qid, response_text, expected_text)
+
+            # ROUGE score - always recompute (cheap)
             metrics['rouge_score'] = await self._rouge_metric(qid, response_text, expected_text)
 
-            llm_score = await self._llm_metric(qid, query, expected_text, response_text)
-            if llm_score is not None:
-                metrics['llm_score'] = llm_score
+            # LLM score - skip if already computed (expensive)
+            if 'llm_score' in existing_metrics and existing_metrics['llm_score'] != -1:
+                metrics['llm_score'] = existing_metrics['llm_score']
+                print(f"Reusing llm_score for qid {qid}")
+            else:
+                llm_score = await self._llm_metric(qid, query, expected_text, response_text)
+                if llm_score is not None:
+                    metrics['llm_score'] = llm_score
 
             return metrics
 
         except Exception as e:
-            print(f"Error evaluating Locomo QA for qid {qid}: {e}")
-            failure_keys = ['f1_score', 'precision', 'recall', 'exact_match', 'sub_em', 'bert_score', 'rouge_score']
-            fallback = {key: metrics.get(key, -1) for key in failure_keys}
-            if self.scoring_client:
-                fallback['llm_score'] = metrics.get('llm_score', -1)
-            return fallback
-
-class HotpotQAEvaluator(BaseEvaluator):
-    """Async Evaluator for HotpotQA dataset"""
-
-    def __init__(self, scoring_client: OpenAI = None):
-        super().__init__()
-        self.scoring_client = scoring_client
-
-    async def evaluate_qa(self, qid: str, query: str, expected_answer: str, response: str) -> dict:
-        metrics: Dict[str, float] = {}
-        try:
-            response_text = str(response)
-            expected_text = str(expected_answer)
-
-            token_metrics = await self._token_metrics(
-                qid,
-                response_text,
-                expected_text,
-                default_keys=['f1_score', 'precision', 'recall', 'exact_match', 'sub_em']
-            )
-            metrics.update(token_metrics)
-
-            metrics['bert_score'] = await self._bert_metric(qid, response_text, expected_text)
-            metrics['rouge_score'] = await self._rouge_metric(qid, response_text, expected_text)
-
-            llm_score = await self._llm_metric(qid, query, expected_text, response_text)
-            if llm_score is not None:
-                metrics['llm_score'] = llm_score
-
-            return metrics
-
-        except Exception as e:
-            print(f"Error evaluating HotpotQA for qid {qid}: {e}")
+            print(f"Error evaluating for qid {qid}: {e}")
             failure_keys = ['f1_score', 'precision', 'recall', 'exact_match', 'sub_em', 'bert_score', 'rouge_score']
             fallback = {key: metrics.get(key, -1) for key in failure_keys}
             if self.scoring_client:
@@ -350,7 +315,7 @@ class HotpotQAEvaluator(BaseEvaluator):
 
 class LongmemEvalEvaluator(BaseEvaluator):
     """Async Evaluator for LongmemEval dataset"""
-    
+
     # Scoring templates
     TEMPLATES = {
         'default': "I will give you a question, a correct answer, and a response from a model. Please answer yes if the response contains the correct answer. Otherwise, answer no. If the response is equivalent to the correct answer or contains all the intermediate steps to get the correct answer, you should also answer yes. If the response only contains a subset of the information required by the answer, answer no. \\n\\nQuestion: {}\\n\\nCorrect Answer: {}\\n\\nModel Response: {}\\n\\nIs the model response correct? Answer yes or no only.",
@@ -359,100 +324,89 @@ class LongmemEvalEvaluator(BaseEvaluator):
         'single-session-preference': "I will give you a question, a rubric for desired personalized response, and a response from a model. Please answer yes if the response satisfies the desired response. Otherwise, answer no. The model does not need to reflect all the points in the rubric. The response is correct as long as it recalls and utilizes the user's personal information correctly.\\n\\nQuestion: {}\\n\\nRubric: {}\\n\\nModel Response: {}\\n\\nIs the model response correct? Answer yes or no only.",
         'abstention': "I will give you an unanswerable question, an explanation, and a response from a model. Please answer yes if the model correctly identifies the question as unanswerable. The model could say that the information is incomplete, or some other information is given but the asked information is not.\\n\\nQuestion: {}\\n\\nExplanation: {}\\n\\nModel Response: {}\\n\\nDoes the model correctly identify the question as unanswerable? Answer yes or no only."
     }
-    
+
     def __init__(self, scoring_client: OpenAI):
         super().__init__()
         self.scoring_client = scoring_client
 
-    async def evaluate_qa(self, qid: str, query: str, expected_answer: str, response: str) -> dict:
-        metrics: Dict[str, float] = {}
+    def _get_template_for_qid(self, qid: str) -> str:
+        """Get appropriate template based on qid and question type"""
+        question_type = self.qid_category_map.get(qid, "multi-session")
+        qid_parts = qid.split('_')
+        abstention = len(qid_parts) >= 3 and '_'.join(qid_parts[1:-1]).endswith("_abs")
+        if abstention:
+            return self.TEMPLATES['abstention']
+        else:
+            return self.TEMPLATES.get(question_type, self.TEMPLATES['default'])
+
+    async def _llm_metric(self, qid: str, query: str, expected_text: str, response_text: str,
+                          *, template: Optional[str] = None) -> Optional[float]:
+        """Override to use question-type-specific template"""
+        if template is None:
+            template = self._get_template_for_qid(qid)
+        return await super()._llm_metric(qid, query, expected_text, response_text, template=template)
+
+class KeywordMatchEvaluator(BaseEvaluator):
+    """Async Evaluator for datasets using keyword matching (e.g., booksum, infbench)"""
+
+    def __init__(self, scoring_client: OpenAI = None):
+        super().__init__(scoring_client)
+
+    def compute_keyword_hit_rate(self, prediction: str, gold_answer: str) -> float:
+        """
+        Compute keyword hit rate based on long_context_eval.py implementation.
+
+        Args:
+            prediction: Model's predicted answer
+            gold_answer: Ground truth answer (comma-separated keywords or list)
+
+        Returns:
+            Float between 0 and 1 representing the proportion of keywords found
+        """
+        # Convert gold_answer to list of keywords if it's a string
+        if isinstance(gold_answer, str):
+            keywords = [kw.strip() for kw in gold_answer.split(",")]
+        elif isinstance(gold_answer, list):
+            keywords = gold_answer
+        else:
+            keywords = [str(gold_answer)]
+
+        if not keywords:
+            return 0.0
+
+        # Count how many keywords appear in prediction (case-insensitive)
+        prediction_lower = prediction.lower()
+        hit = 0
+        for keyword in keywords:
+            if keyword.lower() in prediction_lower:
+                hit += 1
+
+        return hit / len(keywords)
+
+    async def evaluate_qa(self, qid: str, query: str, expected_answer: str, response: str, existing_metrics: dict = None) -> dict:
+        """Evaluate QA with keyword hit rate metric in addition to standard metrics"""
+        # Get standard metrics from base evaluator (with expensive metric reuse)
+        metrics = await super().evaluate_qa(qid, query, expected_answer, response, existing_metrics)
+
+        # Add keyword hit rate metric (cheap to compute, so always recompute)
         try:
-            question_type = self.qid_category_map.get(qid, "multi-session")
             response_text = str(response)
             expected_text = str(expected_answer)
-
-            token_metrics = await self._token_metrics(
-                qid,
-                response_text,
-                expected_text,
-                default_keys=['f1_score', 'precision', 'recall', 'exact_match', 'sub_em']
-            )
-            metrics.update(token_metrics)
-
-            metrics['bert_score'] = await self._bert_metric(qid, response_text, expected_text)
-            metrics['rouge_score'] = await self._rouge_metric(qid, response_text, expected_text)
-
-            qid_parts = qid.split('_')
-            abstention = len(qid_parts) >= 3 and '_'.join(qid_parts[1:-1]).endswith("_abs")
-            if abstention:
-                template = self.TEMPLATES['abstention']
-            else:
-                template = self.TEMPLATES.get(question_type, self.TEMPLATES['default'])
-
-            llm_score = await self._llm_metric(qid, query, expected_text, response_text, template=template)
-            if llm_score is not None:
-                metrics['llm_score'] = llm_score
-            return metrics
-
+            metrics['keyword_hit_rate'] = self.compute_keyword_hit_rate(response_text, expected_text)
         except Exception as e:
-            print(f"Error evaluating LongmemEval QA for qid {qid}: {e}")
-            failure_keys = ['f1_score', 'precision', 'recall', 'exact_match', 'sub_em', 'bert_score', 'rouge_score', 'llm_score']
-            return {key: metrics.get(key, -1) for key in failure_keys}
+            print(f"Error computing keyword_hit_rate for qid {qid}: {e}")
+            metrics['keyword_hit_rate'] = -1
 
-
-class MSCEvaluator(BaseEvaluator):
-    """Evaluator for MSC-Self-Instruct dataset"""
-    def __init__(self, scoring_client: OpenAI):
-        super().__init__()
-        self.scoring_client = scoring_client
-    
-    async def evaluate_qa(self, qid: str, query: str, expected_answer: str, response: str) -> dict:
-        """
-        Evaluate a single QA pair for MSC-Self-Instruct
-        Uses token-based metrics + BERT score for memory recall tasks
-        """
-        metrics: Dict[str, float] = {}
-        try:
-            response_text = str(response)
-            expected_text = str(expected_answer)
-            
-            # Token-based metrics
-            token_metrics = await self._token_metrics(
-                qid,
-                response_text,
-                expected_text,
-                default_keys=['f1_score', 'precision', 'recall', 'exact_match', 'sub_em']
-            )
-            metrics.update(token_metrics)
-            
-            metrics['bert_score'] = await self._bert_metric(qid, response_text, expected_text)
-            metrics['rouge_score'] = await self._rouge_metric(qid, response_text, expected_text)
-
-            llm_score = await self._llm_metric(qid, query, expected_text, response_text)
-            if llm_score is not None:
-                metrics['llm_score'] = llm_score
-
-            return metrics
-            
-        except Exception as e:
-            print(f"Error evaluating MSC QA for qid {qid}: {e}")
-            failure_keys = ['f1_score', 'precision', 'recall', 'exact_match', 'sub_em', 'bert_score', 'rouge_score', 'llm_score']
-            return {key: metrics.get(key, -1) for key in failure_keys}
+        return metrics
 
 def get_evaluator(task: str, scoring_client: OpenAI|None = None) -> BaseEvaluator:
     """Factory function to get appropriate evaluator for task"""
     if task == 'longmemeval':
-        if scoring_client is None:
-            raise ValueError("scoring_client is required for longmemeval task")
         return LongmemEvalEvaluator(scoring_client)
-    elif task == 'locomo':
-        return LocomoEvaluator(scoring_client)
-    elif task == 'hotpotqa':
-        return HotpotQAEvaluator(scoring_client)
-    elif task == 'msc':
-        return MSCEvaluator(scoring_client)
+    elif task in ['booksum', 'infbench']:
+        return KeywordMatchEvaluator(scoring_client)
     else:
-        raise NotImplementedError(f"Evaluator for task '{task}' not implemented")
+        return BaseEvaluator(scoring_client)
 
 def create_client():
     """Create AsyncOpenAI client for async operations"""
@@ -460,15 +414,15 @@ def create_client():
 
 def create_judge_client():
     """Create AsyncOpenAI client for judging"""
-    return AsyncOpenAI(**API_CONFIG)
+    return AsyncOpenAI(**API_CONFIG_LOCAL)
 
 def load_dataset(task: str, force_rebuild: bool = False):
     """Load dataset for given task"""
     if task not in DATASET_LOADERS:
         raise ValueError(f"Unknown task: {task}")
-    return DATASET_LOADERS[task](force_rebuild)
+    return DATASET_LOADERS[task](force_rebuild=force_rebuild)
 
-async def process_single_sample(sample, agent, output_file, task, semaphore):
+async def process_single_sample(sample, agent, output_file, task, semaphore, write_lock):
     """Process a single sample asynchronously"""
     async with semaphore:
         print(f"Processing sample: {sample.task_id}")
@@ -496,6 +450,7 @@ async def process_single_sample(sample, agent, output_file, task, semaphore):
                 else:
                     agent.add_memory(sample.chunks[chunk_idx])
                 chunk_idx += 1
+                print(f"Chunk {chunk_idx} / {len(sample.chunks)} added", flush=True)
             
             # Process questions at this position
             questions_at_position = position_groups[position]
@@ -521,7 +476,7 @@ async def process_single_sample(sample, agent, output_file, task, semaphore):
                 results.append(result)
         
         # Write all results to file at once (with file lock for thread safety)
-        async with asyncio.Lock():
+        async with write_lock:
             with open(output_file, 'a', encoding='utf-8') as f:
                 for result in results:
                     f.write(json.dumps(result, ensure_ascii=False) + '\n')
@@ -571,8 +526,9 @@ async def generate_responses_async(task, agent_class, agent_config, agent_id, ou
     
     print(f"Processing {len(remaining_samples)} remaining samples with concurrency {concurrency}")
     
-    # Create semaphore to limit concurrent samples
+    # Shared synchronization primitives for workers
     semaphore = asyncio.Semaphore(concurrency)
+    write_lock = asyncio.Lock()
     
     # Create agent instances for concurrent processing
     client = create_client()
@@ -588,12 +544,24 @@ async def generate_responses_async(task, agent_class, agent_config, agent_id, ou
             wo_q = agent_config.get('wo_q', False)
             agent = agent_class(wo_q=wo_q, client=client, model_name=model_name)
         elif agent_class.__name__ == 'MemAlphaUnifiedAgent':
-            agent = agent_class(client=client, **agent_config)
+            agent = agent_class(model_name=model_name, client=client, **agent_config)
+        elif agent_class.__name__ == 'VerlMemoryAgent':
+            agent = agent_class(model_name=model_name, client=client, data_source={
+                "synth-s1": "synth",
+                "synth-s3": "synth",
+                "synth-s50": "synth",
+                "booksum": "memalpha_booksum",
+                "nlu": "memalpha_icl_nlu_8296shot_balance",
+                "perltqa": "memalpha_perltqa",
+                "pubmed_rct": "memalpha_pubmed-rct",
+                "trec_coarse": "memalpha_icl_trec_coarse_6600shot_balance",
+                "squad": "memalpha_squad",
+            }.get(task, task))
         else:
             # Other agents (ConcatAgent, EmergenceAgent) use model_name
             agent = agent_class(model_name=model_name, client=client)
-        
-        task_coroutine = process_single_sample(sample, agent, final_output_file, task, semaphore)
+
+        task_coroutine = process_single_sample(sample, agent, final_output_file, task, semaphore, write_lock)
         tasks.append(task_coroutine)
     
     # Process all tasks concurrently with progress bar
@@ -609,21 +577,28 @@ async def generate_responses_async(task, agent_class, agent_config, agent_id, ou
     
     return final_output_file
 
-async def evaluate_single_response(item, evaluator, results_file, semaphore):
+async def evaluate_single_response(item, evaluator, results_file, semaphore, write_lock, existing_metrics_map):
     """Evaluate a single response asynchronously"""
     async with semaphore:
+        qid = item['qid']
+        # Get existing valid metrics for this qid (if any)
+        existing_metrics = existing_metrics_map.get(qid, {})
+
         eval_start_time = time.time()
-        
+
         metrics_info = await evaluator.evaluate_qa(
-            qid=item['qid'], query=item['query'],
-            expected_answer=str(item['expected_answer']), response=str(item['response'])
+            qid=qid,
+            query=item['query'],
+            expected_answer=str(item['expected_answer']),
+            response=str(item['response']),
+            existing_metrics=existing_metrics  # Pass existing metrics to avoid recomputing
         )
-        
+
         eval_end_time = time.time()
         evaluation_time = eval_end_time - eval_start_time
-        
+
         metrics = {k: v for k, v in metrics_info.items() if isinstance(v, (int, float))}
-        
+
         result = {
             'qid': item['qid'],
             'query': item['query'],
@@ -632,76 +607,104 @@ async def evaluate_single_response(item, evaluator, results_file, semaphore):
             'metric': metrics,
             'evaluation_time': evaluation_time
         }
-        
+
         # Add generation_time if it exists
         if 'generation_time' in item:
             result['generation_time'] = item['generation_time']
-        
-        # Write result to file with async lock
-        async with asyncio.Lock():
+
+        # Write result to file with shared async lock
+        async with write_lock:
             with open(results_file, 'a', encoding='utf-8') as f:
                 f.write(json.dumps(result, ensure_ascii=False) + '\n')
                 f.flush()
-        
+
         return result
 
-async def evaluate_responses_async(input_file, task, output_dir, agent_id="unknown", concurrency=64):
-    """Evaluate responses from input file with async concurrency"""
+async def evaluate_responses_async(input_file, task, output_dir, agent_id="unknown", concurrency=64, force_overwrite=False):
+    """Evaluate responses from input file with async concurrency.
+
+    When ``force_overwrite`` is true all existing ``evaluated_*.jsonl`` files
+    under ``output_dir`` are deleted before re-running the evaluation. If an
+    existing results file contains any incomplete metrics it will be fully
+    re-evaluated and overwritten.
+    """
     print(f"Starting async evaluation for file: {input_file}")
     start_time = time.time()
-    
+
     # Load responses
     with open(input_file, 'r', encoding='utf-8') as f:
         responses = [json.loads(line) for line in f]
-    
+
     # Create output file
     results_file = f"{output_dir}/evaluated_{agent_id}.jsonl"
-    
+
+    # Define expected metrics based on task
+    # Since we always provide scoring_client in this evaluation flow, llm_score is always expected
+    base_metrics = ['f1_score', 'precision', 'recall', 'exact_match', 'sub_em', 'bert_score', 'rouge_score', 'llm_score']
+    if task in ['booksum', 'infbench']:
+        expected_metrics = base_metrics + ['keyword_hit_rate']
+    else:
+        expected_metrics = base_metrics
+
+    # Collect existing valid metrics to avoid recomputing expensive metrics
+    existing_metrics_map = {}  # {qid: {metric_name: value}}
+
     # Check for existing partial results
-    completed_qids = set()
-    valid_results = []  # Store results with all metrics valid
-    if os.path.exists(results_file):
+    if force_overwrite:
+        if Path(results_file).exists():
+            try:
+                Path(results_file).unlink()
+                print(f"Force overwrite enabled. Removed existing {results_file}")
+            except OSError as exc:
+                print(f"Warning: failed to remove {results_file}: {exc}")
+        else:
+            print("Force overwrite enabled but no existing evaluation file found to remove")
+    elif os.path.exists(results_file):
         print(f"Found existing evaluation file: {results_file}")
+        needs_rerun = False
         with open(results_file, 'r', encoding='utf-8') as f:
-            for line in f:
+            for idx, line in enumerate(f, 1):
                 try:
                     result = json.loads(line)
-                    qid = result['qid']
-                    metrics = result.get('metric', {})
-                    
-                    # Check if all metrics are valid (not -1)
-                    all_metrics_valid = all(v != -1 for v in metrics.values()) if metrics else False
-                    
-                    if all_metrics_valid:
-                        completed_qids.add(qid)
-                        valid_results.append(result)
-                    else:
-                        print(f"Found incomplete evaluation for qid {qid}, will re-evaluate")
-                except Exception as e:
-                    print(f"Error parsing line: {e}")
-                    continue
-        
-        # Rewrite the file with only valid results
-        if valid_results:
-            with open(results_file, 'w', encoding='utf-8') as f:
-                for result in valid_results:
-                    f.write(json.dumps(result, ensure_ascii=False) + '\n')
-            print(f"Cleaned results file: kept {len(valid_results)} valid evaluations")
-        elif os.path.exists(results_file):
-            # If no valid results, remove the file
-            os.remove(results_file)
-            print("No valid evaluations found, removed results file")
-        
-        print(f"Found {len(completed_qids)} completed questions with valid metrics")
+                except json.JSONDecodeError as exc:
+                    print(f"Line {idx}: invalid JSON ({exc}). Will re-run evaluation")
+                    needs_rerun = True
+                    break
+
+                qid = result.get('qid')
+                metrics = result.get('metric') or {}
+
+                # Collect valid metrics (expensive ones: bert_score, llm_score)
+                if qid:
+                    valid_metrics = {k: v for k, v in metrics.items() if v != -1 and k in ['bert_score', 'llm_score']}
+                    if valid_metrics:
+                        existing_metrics_map[qid] = valid_metrics
+
+                # Check if all expected metrics exist and are valid
+                missing_metrics = []
+                for expected_metric in expected_metrics:
+                    if expected_metric not in metrics or metrics[expected_metric] == -1:
+                        missing_metrics.append(expected_metric)
+
+                if missing_metrics:
+                    if not needs_rerun:
+                        print(f"Found incomplete metrics for qid {qid}: missing/invalid {missing_metrics}")
+                    needs_rerun = True
+                    # Don't break - continue collecting valid metrics
+
+        if needs_rerun:
+            if existing_metrics_map:
+                print(f"Found valid expensive metrics for {len(existing_metrics_map)} questions, will reuse them")
+            # Don't delete the file anymore - we'll overwrite with new results
+        else:
+            print("All responses already evaluated with complete metrics. Skipping re-evaluation")
+            return
     
-    # Filter out completed responses
-    remaining_responses = [r for r in responses if r['qid'] not in completed_qids]
-    
-    if not remaining_responses:
-        print("All responses already evaluated!")
-        return results_file, {}
-    
-    print(f"Evaluating {len(remaining_responses)} remaining responses with concurrency {concurrency}")
+    if not responses:
+        print("No responses found for evaluation")
+        return
+
+    print(f"Evaluating {len(responses)} responses with concurrency {concurrency}")
     
     # Create evaluator and semaphore
     try:
@@ -713,21 +716,22 @@ async def evaluate_responses_async(input_file, task, output_dir, agent_id="unkno
         BaseEvaluator.warmup_bert_model()
     except NotImplementedError as e:
         print(f"Warning: {e}. Using default metrics.")
-        return results_file, {}
+        return
     
     semaphore = asyncio.Semaphore(concurrency)
-    
+    write_lock = asyncio.Lock()
+
     # Create tasks for all evaluations
     tasks = [
-        evaluate_single_response(item, evaluator, results_file, semaphore)
-        for item in remaining_responses
+        evaluate_single_response(item, evaluator, results_file, semaphore, write_lock, existing_metrics_map)
+        for item in responses
     ]
     
     # Process all tasks concurrently with progress bar
     results = await atqdm.gather(*tasks, desc="Evaluating responses")
     
     # Calculate metrics
-    total_metrics = {}
+    metrics_acc = defaultdict(lambda: [0.0, 0])
     total_evaluation_time = sum(r['evaluation_time'] for r in results)
     
     # Aggregate metrics
@@ -735,10 +739,8 @@ async def evaluate_responses_async(input_file, task, output_dir, agent_id="unkno
         metrics = result.get('metric', {})
         for metric_name, score in metrics.items():
             if score != -1:
-                total_metrics[metric_name] = total_metrics.get(metric_name, 0) + score
-                if f"{metric_name}_count" not in total_metrics:
-                    total_metrics[f"{metric_name}_count"] = 0
-                total_metrics[f"{metric_name}_count"] += 1
+                total, count = metrics_acc[metric_name]
+                metrics_acc[metric_name] = [total + score, count + 1]
     
     # Calculate and display averages
     avg_metrics = {}
@@ -746,26 +748,24 @@ async def evaluate_responses_async(input_file, task, output_dir, agent_id="unkno
     avg_evaluation_time = total_evaluation_time / len(results) if results else 0
     
     print(f"Evaluation complete! Metrics:")
-    
-    for metric_name in ['f1_score', 'exact_match', 'bert_score', 'rouge_score', 'llm_score', 'precision', 'recall', 'sub_em']:
-        if metric_name in total_metrics:
-            valid_count = total_metrics.get(f"{metric_name}_count", 0)
-            if valid_count > 0:
-                avg_score = total_metrics[metric_name] / valid_count
-                avg_metrics[metric_name] = avg_score
-                print(f"  {metric_name}: {avg_score:.4f} ({total_metrics[metric_name]}/{valid_count} valid)")
+
+    for metric_name in ['f1_score', 'exact_match', 'bert_score', 'rouge_score', 'llm_score', 'keyword_hit_rate', 'precision', 'recall', 'sub_em']:
+        total, valid_count = metrics_acc.get(metric_name, (0.0, 0))
+        if valid_count:
+            avg_score = total / valid_count
+            avg_metrics[metric_name] = avg_score
+            print(f"  {metric_name}: {avg_score:.4f} ({total}/{valid_count} valid)")
     
     print(f"Total evaluation time: {total_time:.2f}s")
     print(f"Average evaluation time per question: {avg_evaluation_time:.2f}s")
     print(f"Results saved to: {results_file}")
-    
-    return results_file, avg_metrics
+
 
 def get_args():
     parser = argparse.ArgumentParser(description='Memory Agent Evaluation - Async Version')
-    parser.add_argument('--task', type=str, choices=['locomo', 'longmemeval', 'hotpotqa', 'msc', 'memalpha', 'trec_coarse', 'trec_fine', 'banking77', 'clinic', 'nlu', 'booksum', 'perltqa', 'pubmed_rct'], default='longmemeval')
-    parser.add_argument('--agent', type=str, choices=['concat', 'memagent', 'filememory', 'emergence', 'memalpha'], default='emergence')
-    parser.add_argument('--wo_q', action='store_true', help='Use wo_q mode for MemAgent')
+    parser.add_argument('--task', type=str, default='longmemeval')
+    parser.add_argument('--agent', type=str, default='emergence')
+    parser.add_argument('--agent_id', type=str, default=None, help='Agent name for output files (default: agent type)')
     default_agent_cfg_path = (
         Path(__file__).resolve().parents[1]
         / 'Mem-alpha'
@@ -793,11 +793,14 @@ def get_args():
     parser.add_argument('--concurrency', type=int, default=32,
                         help='Number of concurrent tasks (default: 32)')
     parser.add_argument('--generate_only', action='store_true', help='Generate Only mode')
+    parser.add_argument('--force_overwrite', action='store_true',
+                        help='Re-evaluate all responses and overwrite existing evaluated files')
     return parser.parse_args()
 
 async def main():
     args = get_args()
-    
+    if args.agent_id is None:
+        args.agent_id = args.agent
     # Increase thread pool size for high concurrency
     import concurrent.futures
     loop = asyncio.get_event_loop()
@@ -812,51 +815,43 @@ async def main():
     
     if args.input_file is None:
         # Generation + Evaluation
-        print("Mode: Async Generation + Evaluation")
+        print("Mode: Async Generation" if args.generate_only else "Mode: Async Generation + Evaluation")
         
+        if args.agent == 'memagent_woq':
+            args.agent = 'memagent'
+            agent_config = {'wo_q': True}
+        elif args.agent == 'memalpha':
+            agent_config = {}
+            if args.agent_config_path:
+                agent_config['agent_config_path'] = args.agent_config_path
+            if args.prompts_config_path:
+                agent_config['prompts_config_path'] = args.prompts_config_path
+        else:
+            agent_config = {}
         # Create agent configuration
         if args.agent in AGENT_CLASS:
             agent_class = AGENT_CLASS[args.agent]
-            if args.agent == 'memagent' and args.wo_q:
-                agent_config = {'wo_q': True}
-                agent_id = 'memagent_woq'
-            elif args.agent == 'memalpha':
-                agent_config = {}
-                if args.agent_config_path:
-                    agent_config['agent_config_path'] = args.agent_config_path
-                if args.prompts_config_path:
-                    agent_config['prompts_config_path'] = args.prompts_config_path
-                agent_id = args.agent
-            else:
-                agent_config = {}
-                agent_id = args.agent
         else:
             raise ValueError(f"Unknown agent type: {args.agent}")
         
         responses_file = await generate_responses_async(
-            args.task, agent_class, agent_config, agent_id, output_dir, args.concurrency, args.model
+            args.task, agent_class, agent_config, args.agent_id, output_dir, args.concurrency, args.model
         )
         
         if not args.generate_only:
             await evaluate_responses_async(
-                responses_file, args.task, output_dir, agent_id, args.concurrency
+                responses_file, args.task, output_dir, args.agent_id, args.concurrency,
+                force_overwrite=args.force_overwrite
             )
     else:
         # Evaluation only
         print("Mode: Async Evaluation only")
-        agent_id = "unknown"
-        if "responses_" in args.input_file:
-            try:
-                filename_part = args.input_file.split("responses_")[1].replace(".jsonl", "")
-                if "_woq_" in filename_part:
-                    agent_id = filename_part.split("_woq_")[0] + "_woq"
-                else:
-                    agent_id = filename_part.split("_")[0]
-            except:
-                pass
+        assert "responses_" in args.input_file, "Input file name must contain 'responses_'"
+        agent_id = args.input_file.split("responses_")[-1].replace(".jsonl", "")
         
         await evaluate_responses_async(
-            args.input_file, args.task, output_dir, agent_id, args.concurrency
+            args.input_file, args.task, output_dir, agent_id, args.concurrency,
+            force_overwrite=args.force_overwrite
         )
 
 if __name__ == "__main__":

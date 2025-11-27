@@ -13,6 +13,23 @@ MEMORYAGENTBENCH_PARQUET_PATH = "/mnt/pfs-guan-ssai/nlu/zhangkehao/Mem-alpha/dat
 BenchmarkRegistry = dict[str, Callable[..., list["EvalData"]]]
 BENCHMARK_REGISTRY: BenchmarkRegistry = {}
 
+CLASSIFICATION_TASK_HINT = (
+    "Task: This is a classification sample. Respond only with the correct label "
+    "for the sentence below rather than answering the sentence itself."
+)
+
+
+def _prepend_classification_hint(samples: list["EvalData"]) -> bool:
+    """Prepend explicit classification instruction to each question query."""
+    modified = False
+    for sample in samples:
+        for question in sample.questions:
+            if CLASSIFICATION_TASK_HINT in question.query:
+                continue
+            question.query = f"{CLASSIFICATION_TASK_HINT}\n\n{question.query}"
+            modified = True
+    return modified
+
 
 def register_benchmark(name: str | None = None) -> Callable[[Callable[..., list["EvalData"]]], Callable[..., list["EvalData"]]]:
     """Decorator to register benchmark loaders for easy discovery."""
@@ -24,9 +41,6 @@ def register_benchmark(name: str | None = None) -> Callable[[Callable[..., list[
     return decorator
 
 random.seed(114514)
-
-# Set HuggingFace cache directory for MSC dataset loading
-os.environ['HF_HOME'] = '/mnt/pfs-guan-ssai/nlu/zhangkehao/.cache/huggingface'
 
 class Question(BaseModel):
     qid: str|None = None
@@ -159,8 +173,7 @@ def _load_parquet_subset(
     force_rebuild: bool,
 ) -> list[EvalData]:
     if os.path.exists(cache_path) and not force_rebuild:
-        processed_dataset = json.load(open(cache_path))
-        return [EvalData(**data) for data in processed_dataset]
+        return load_from_path(cache_path)
 
     if not os.path.exists(parquet_path):
         raise FileNotFoundError(f"Source parquet file not found: {parquet_path}")
@@ -190,8 +203,7 @@ def load_locomo(force_rebuild=False):
     # 5. adversarial
     file_path = "data/processed_locomo.json"
     if os.path.exists(file_path) and not force_rebuild:
-        processed_dataset = json.load(open(file_path))
-        return [EvalData(**data) for data in processed_dataset]
+        return load_from_path(file_path)
     raw = json.load(open("data/raw/locomo10.json"))
     processed = []
     for item in raw:
@@ -259,8 +271,7 @@ def load_locomo(force_rebuild=False):
 def load_longmemeval(force_rebuild=False, oracle=False):
     file_path = "data/processed_longmemeval_oracle.json" if oracle else "data/processed_longmemeval.json"
     if os.path.exists(file_path) and not force_rebuild:
-        processed_dataset = json.load(open(file_path))
-        return [EvalData(**data) for data in processed_dataset]
+        return load_from_path(file_path)
     
     raw = json.load(open("data/raw/longmemeval_s.json"))
     processed = []
@@ -333,8 +344,7 @@ def load_hotpotqa_deprecated(force_rebuild=False, num_docs: int=200, num_queries
     """Deprecated: Old HotpotQA loader using HuggingFace dataset"""
     file_path = f"data/processed_hotpotqa_{num_docs}_{num_queries}_{num_samples}.json"
     if os.path.exists(file_path) and not force_rebuild:
-        processed_dataset = json.load(open(file_path))
-        return [EvalData(**data) for data in processed_dataset]
+        return load_from_path(file_path)
     
     from datasets import load_dataset
     raw = load_dataset("hotpotqa/hotpot_qa", "distractor", split="validation")
@@ -470,8 +480,7 @@ def load_hotpotqa(force_rebuild=False, num_docs: int=200, num_queries: int=1, nu
     
     file_path = f"data/processed_hotpotqa_{num_docs}.json"
     if os.path.exists(file_path) and not force_rebuild:
-        processed_dataset = json.load(open(file_path))
-        return [EvalData(**data) for data in processed_dataset]
+        return load_from_path(file_path)
     
     # Load source data
     source_file = f"/mnt/pfs-guan-ssai/nlu/zhangkehao/MemAgent_minimal/data/taskutils/memory_data/eval_{num_docs}.json"
@@ -529,8 +538,7 @@ def load_memalpha(force_rebuild: bool = False) -> list[EvalData]:
     """Load MemAlpha benchmark data into EvalData format."""
     file_path = "data/processed_memalpha.json"
     if os.path.exists(file_path) and not force_rebuild:
-        processed_dataset = json.load(open(file_path))
-        return [EvalData(**data) for data in processed_dataset]
+        return load_from_path(file_path)
 
     if not os.path.exists(MEMALPHA_PARQUET_PATH):
         raise FileNotFoundError(f"MemAlpha source file not found: {MEMALPHA_PARQUET_PATH}")
@@ -550,72 +558,111 @@ def load_memalpha(force_rebuild: bool = False) -> list[EvalData]:
 @register_benchmark()
 def load_trec_coarse(force_rebuild: bool = False) -> list[EvalData]:
     """Load TREC-Coarse subset from MemoryAgentBench into EvalData format."""
-    return _load_parquet_subset(
+    cache_path = "data/processed_trec_coarse.json"
+    data = _load_parquet_subset(
         parquet_path=MEMORYAGENTBENCH_PARQUET_PATH,
-        cache_path="data/processed_trec_coarse.json",
+        cache_path=cache_path,
         data_source_value="icl_trec_coarse_6600shot_balance",
         task_prefix="trec_coarse",
         default_source="trec_coarse",
         id_keys=["instance_id"],
         force_rebuild=force_rebuild,
     )
+    if _prepend_classification_hint(data):
+        with open(cache_path, "w", encoding="utf-8") as cache_file:
+            json.dump([item.model_dump() for item in data], cache_file, indent=4, ensure_ascii=False)
+    return data
 
 
 @register_benchmark()
 def load_banking77(force_rebuild: bool = False) -> list[EvalData]:
     """Load Banking77 subset from MemoryAgentBench into EvalData format."""
-    return _load_parquet_subset(
+    cache_path = "data/processed_banking77.json"
+    data = _load_parquet_subset(
         parquet_path=MEMORYAGENTBENCH_PARQUET_PATH,
-        cache_path="data/processed_banking77.json",
+        cache_path=cache_path,
         data_source_value="icl_banking77_5900shot_balance",
         task_prefix="banking77",
         default_source="banking77",
         id_keys=["instance_id"],
         force_rebuild=force_rebuild,
     )
+    if _prepend_classification_hint(data):
+        with open(cache_path, "w", encoding="utf-8") as cache_file:
+            json.dump([item.model_dump() for item in data], cache_file, indent=4, ensure_ascii=False)
+    return data
 
 
 @register_benchmark()
 def load_clinic(force_rebuild: bool = False) -> list[EvalData]:
     """Load Clinic150 subset from MemoryAgentBench into EvalData format."""
-    return _load_parquet_subset(
+    cache_path = "data/processed_clinic.json"
+    data = _load_parquet_subset(
         parquet_path=MEMORYAGENTBENCH_PARQUET_PATH,
-        cache_path="data/processed_clinic.json",
+        cache_path=cache_path,
         data_source_value="icl_clinic150_7050shot_balance",
         task_prefix="clinic",
         default_source="clinic",
         id_keys=["instance_id"],
         force_rebuild=force_rebuild,
     )
+    if _prepend_classification_hint(data):
+        with open(cache_path, "w", encoding="utf-8") as cache_file:
+            json.dump([item.model_dump() for item in data], cache_file, indent=4, ensure_ascii=False)
+    return data
 
 
 @register_benchmark()
 def load_nlu(force_rebuild: bool = False) -> list[EvalData]:
     """Load NLU subset from MemoryAgentBench into EvalData format."""
-    return _load_parquet_subset(
+    cache_path = "data/processed_nlu.json"
+    data = _load_parquet_subset(
         parquet_path=MEMORYAGENTBENCH_PARQUET_PATH,
-        cache_path="data/processed_nlu.json",
+        cache_path=cache_path,
         data_source_value="icl_nlu_8296shot_balance",
         task_prefix="nlu",
         default_source="nlu",
         id_keys=["instance_id"],
         force_rebuild=force_rebuild,
     )
+    if _prepend_classification_hint(data):
+        with open(cache_path, "w", encoding="utf-8") as cache_file:
+            json.dump([item.model_dump() for item in data], cache_file, indent=4, ensure_ascii=False)
+    return data
 
 
 @register_benchmark()
 def load_trec_fine(force_rebuild: bool = False) -> list[EvalData]:
     """Load TREC-Fine subset from MemoryAgentBench into EvalData format."""
-    return _load_parquet_subset(
+    cache_path = "data/processed_trec_fine.json"
+    data = _load_parquet_subset(
         parquet_path=MEMORYAGENTBENCH_PARQUET_PATH,
-        cache_path="data/processed_trec_fine.json",
+        cache_path=cache_path,
         data_source_value="icl_trec_fine_6400shot_balance",
         task_prefix="trec_fine",
         default_source="trec_fine",
         id_keys=["instance_id"],
         force_rebuild=force_rebuild,
     )
+    if _prepend_classification_hint(data):
+        with open(cache_path, "w", encoding="utf-8") as cache_file:
+            json.dump([item.model_dump() for item in data], cache_file, indent=4, ensure_ascii=False)
+    return data
 
+@register_benchmark()
+def load_infbench(force_rebuild: bool = False) -> list[EvalData]:
+    """Load infbench subset from MemoryAgentBench into EvalData format."""
+    cache_path = "data/processed_infbench.json"
+    data = _load_parquet_subset(
+        parquet_path=MEMORYAGENTBENCH_PARQUET_PATH,
+        cache_path=cache_path,
+        data_source_value="infbench_sum_eng_shots2",
+        task_prefix="infbench",
+        default_source="infbench",
+        id_keys=["instance_id"],
+        force_rebuild=force_rebuild,
+    )
+    return data
 
 @register_benchmark()
 def load_booksum(force_rebuild: bool = False) -> list[EvalData]:
@@ -658,6 +705,18 @@ def load_pubmed_rct(force_rebuild: bool = False) -> list[EvalData]:
         force_rebuild=force_rebuild,
     )
 
+@register_benchmark()
+def load_squad(force_rebuild: bool = False) -> list[EvalData]:
+    """Load PubMed-RCT subset from MemAlpha into EvalData format."""
+    return _load_parquet_subset(
+        parquet_path=MEMALPHA_PARQUET_PATH,
+        cache_path="data/processed_squad.json",
+        data_source_value="squad",
+        task_prefix="squad",
+        default_source="squad",
+        id_keys=["instance_id"],
+        force_rebuild=force_rebuild,
+    )
 
 @register_benchmark()
 def load_msc(force_rebuild=False, batch_size=5):
@@ -680,8 +739,7 @@ def load_msc(force_rebuild=False, batch_size=5):
     suffix = "" if batch_size == 1 else f"_batch{batch_size}"
     file_path = f"data/processed_msc{suffix}.json"
     if os.path.exists(file_path) and not force_rebuild:
-        processed_dataset = json.load(open(file_path))
-        return [EvalData(**data) for data in processed_dataset]
+        return load_from_path(file_path)
     
     from datasets import load_dataset
     raw = load_dataset("MemGPT/MSC-Self-Instruct", split="train")
@@ -761,22 +819,133 @@ def load_msc(force_rebuild=False, batch_size=5):
     json.dump([item.model_dump() for item in processed], open(file_path, "w"), indent=4, ensure_ascii=False)
     return processed
 
+def load_from_path(path: str) -> list[EvalData]:
+    """Load EvalData from a given JSON file path."""
+    if os.environ.get("USE_SMALL_VALSETS") == "1":
+        path = path.replace("/", "/small_valsets/")
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"File not found: {path}")
+    processed_dataset = json.load(open(path))
+    return [EvalData(**data) for data in processed_dataset]
+
+@register_benchmark()
+def load_synth(suf, force_rebuild=False) -> list[EvalData]:
+    if os.path.exists(f"data/processed_synth-{suf}.json") and not force_rebuild:
+        return load_from_path(f"data/processed_synth-{suf}.json")
+    from synthv1_async import main
+    main(num_sessions=int(suf[1:]), out=f"data/processed_synth-{suf}.json", no_diversify=True)
+    return load_from_path(f"data/processed_synth-{suf}.json")
+
+@register_benchmark()
+def load_convomem(force_rebuild=False) -> list[EvalData]:
+    """Load ConvoMem benchmark data from pre_mixed_testcases.
+
+    Filters test cases with total conversation length > 2,180,000 characters (~10k questions).
+    Each test case becomes one EvalData with multiple questions from evidenceItems.
+    Each conversation becomes one chunk.
+    """
+    file_path = "data/processed_convomem.json"
+    if os.path.exists(file_path) and not force_rebuild:
+        return load_from_path(file_path)
+
+    from pathlib import Path
+    base_dir = Path("/mnt/pfs-guan-ssai/nlu/zhangkehao/ConvoMem/ConvoMem/core_benchmark/pre_mixed_testcases")
+    json_files = sorted(p.as_posix() for p in base_dir.rglob("*.json"))
+
+    print(f"Found {len(json_files)} JSON files")
+
+    processed = []
+    total_items = 0
+    filtered_items = 0
+
+    for json_path in json_files:
+        # Extract category from directory path
+        # e.g., .../assistant_facts_evidence/6_evidence/batched_001.json -> assistant_facts_evidence
+        path_parts = Path(json_path).parts
+        try:
+            category_idx = path_parts.index("pre_mixed_testcases") + 1
+            category = path_parts[category_idx] if category_idx < len(path_parts) else "unknown"
+        except (ValueError, IndexError):
+            category = "unknown"
+
+        total_data = json.load(open(json_path))
+
+        for item_idx, item in enumerate(total_data):
+            total_items += 1
+
+            # Calculate total character length using the same method as reference code
+            context = '\n'.join([mess['text'] for conv in item['conversations'] for mess in conv['messages']])
+            if len(context) <= 2180000:
+                continue
+
+            filtered_items += 1
+
+            # Build chunks from conversations (each conversation becomes one chunk)
+            chunks = []
+            for conv in item['conversations']:
+                conv_text = ''
+                for msg in conv['messages']:
+                    speaker = msg.get('speaker', 'unknown')
+                    text = msg.get('text', '')
+                    conv_text += f'{speaker}: {text}\n'
+                chunks.append(conv_text.strip())
+
+            # Build questions from evidenceItems
+            questions = []
+            final_position = len(chunks) - 1
+
+            # Generate unique task_id
+            file_name = Path(json_path).stem
+            task_id = f"convomem_{category}_{file_name}_{item_idx}"
+
+            for q_idx, evidence_item in enumerate(item['evidenceItems']):
+                question_text = evidence_item.get('question', '')
+                answer_text = evidence_item.get('answer', '')
+
+                if not question_text:
+                    continue
+
+                questions.append(Question(
+                    qid=f"{task_id}_{q_idx}",
+                    query=question_text,
+                    answer=answer_text,
+                    position=final_position,
+                    category=category
+                ))
+
+            if questions:  # Only add if there are questions
+                evaldata = EvalData(
+                    task_id=task_id,
+                    questions=questions,
+                    chunks=chunks
+                )
+                processed.append(evaldata)
+
+    print(f"Total items processed: {total_items}")
+    print(f"Items with length > 1M: {filtered_items}")
+    print(f"Final EvalData entries: {len(processed)}")
+
+    # Save processed data
+    json.dump([item.model_dump() for item in processed], open(file_path, "w"), indent=4, ensure_ascii=False)
+    return processed
 
 AVAILABLE_BENCHMARKS = sorted(BENCHMARK_REGISTRY)
 print(f"[EvalDataset] Registered benchmarks: {', '.join(AVAILABLE_BENCHMARKS)}")
 # banking77, booksum, clinic, hotpotqa, locomo, longmemeval, memalpha, msc, nlu, perltqa, pubmed_rct, trec_coarse, trec_fine
 
 if __name__ == '__main__':
-    # locomo = load_locomo(True)
-    # longmemeval = load_longmemeval(True)
-    # hotpotqa = load_hotpotqa(True, num_docs=10, num_queries=3, num_samples=5)  # Small test
-    test_data = load_banking77(True)
-    # test_data = load_trec_coarse(True)
-    if test_data:
-        sample = test_data[0]
-        print(f"Sample: {sample.task_id}, Questions: {len(sample.questions)}, Chunks: {len(sample.chunks)}")
-        if sample.questions:
-            print(f"Question: {sample.questions[0].query}")
-            print(f"Answer: {sample.questions[0].answer}")
-        if sample.chunks:
-            print(f"Chunk 0 preview: {sample.chunks[0][:200]}...")
+    # for load_func in [load_trec_coarse, load_banking77, load_clinic, load_nlu, load_trec_fine]:
+    #     test_data = load_func(True)
+    #     if test_data:
+    #         sample = test_data[0]
+    #         print(f"Sample: {sample.task_id}, Questions: {len(sample.questions)}, Chunks: {len(sample.chunks)}")
+    #         if sample.questions:
+    #             print(f"Question: {sample.questions[0].query}")
+    #             print(f"Answer: {sample.questions[0].answer}")
+    #         if sample.chunks:
+    #             print(f"Chunk 0 preview: {sample.chunks[0][:200]}...")
+    # load_synth("s1", force_rebuild=True)
+    # load_synth("s3", force_rebuild=True)
+    # load_synth("s50", force_rebuild=True)
+    # load_infbench()
+    load_synth("s10", force_rebuild=True)

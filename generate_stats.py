@@ -1,30 +1,90 @@
 #!/usr/bin/env python3
-"""
-Generate evaluation statistics tables for each task
-"""
+"""Generate evaluation statistics tables from evaluation outputs."""
 
 import os
 import json
 import glob
 import argparse
 from collections import defaultdict
-from prettytable import PrettyTable
 from datetime import datetime
+from typing import Dict, List, Optional
 
-# Import dataset loaders
+from prettytable import PrettyTable
+
 import sys
 sys.path.append('.')
-from data.EvalDataset import load_locomo, load_longmemeval, load_msc
+
+from config import DATASET_LOADERS
+
+
+def _extract_agent_name(filename: str, prefix: str) -> str:
+    """Extract the agent name from filenames like prefix_agent[_timestamp].jsonl."""
+    base = filename
+    if base.endswith('.jsonl'):
+        base = base[:-6]
+    if base.startswith(prefix):
+        base = base[len(prefix):]
+    parts = base.split('_')
+    if len(parts) > 1 and parts[-1].isdigit():
+        return '_'.join(parts[:-1])
+    return base
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Generate evaluation statistics')
     parser.add_argument('--results_dir', type=str, default='results/qwen3-4b',
                         help='Results directory containing task subdirectories')
-    parser.add_argument('--task', type=str, choices=['locomo', 'longmemeval', 'hotpotqa', 'msc', 'all'], default='all',
-                        help='Task to generate statistics for')
+    parser.add_argument('--task', type=str, default='all',
+                        help='Task to generate statistics for (default: all subdirectories)')
     parser.add_argument('--save_txt', action='store_true',
-                        help='Save statistics to txt file (default: False)')
+                        help='Save statistics to txt files (default: False)')
     return parser.parse_args()
+
+
+def load_agent_ignore(results_dir: str) -> tuple[set[str], Optional[str]]:
+    """Load ignored agents from .agentignore located in results_dir or its ancestors."""
+    current = os.path.abspath(results_dir)
+    while True:
+        ignore_file = os.path.join(current, '.agentignore')
+        if os.path.isfile(ignore_file):
+            with open(ignore_file, 'r', encoding='utf-8') as f:
+                entries = {line.strip() for line in f if line.strip() and not line.startswith('#')}
+            return entries, ignore_file
+        parent = os.path.dirname(current)
+        if parent == current:
+            break
+        current = parent
+    return set(), None
+
+
+def load_bench_ignore(results_dir: str) -> tuple[set[str], Optional[str]]:
+    """Load ignored benchmarks from .benchignore located in results_dir or its ancestors."""
+    current = os.path.abspath(results_dir)
+    while True:
+        ignore_file = os.path.join(current, '.benchignore')
+        if os.path.isfile(ignore_file):
+            with open(ignore_file, 'r', encoding='utf-8') as f:
+                entries = {line.strip() for line in f if line.strip() and not line.startswith('#')}
+            return entries, ignore_file
+        parent = os.path.dirname(current)
+        if parent == current:
+            break
+        current = parent
+    return set(), None
+
+
+def discover_tasks(results_dir: str, requested_task: str) -> List[str]:
+    """Return the list of tasks to process."""
+    if requested_task != 'all':
+        return [requested_task]
+
+    if not os.path.isdir(results_dir):
+        return []
+
+    tasks = [
+        name for name in sorted(os.listdir(results_dir))
+        if os.path.isdir(os.path.join(results_dir, name)) and not name.startswith('.')
+    ]
+    return tasks
 
 def load_evaluation_results(results_dir, task):
     """Load all evaluation results for a task"""
@@ -39,13 +99,9 @@ def load_evaluation_results(results_dir, task):
     agent_results = defaultdict(list)
     
     for file_path in eval_files:
-        # Extract agent name from filename: evaluated_{agent}_{timestamp}.jsonl
         filename = os.path.basename(file_path)
-        try:
-            agent_name = filename.split('.')[0].split('_')[1]
-        except IndexError:
-            agent_name = "unknown"
-        
+        agent_name = _extract_agent_name(filename, 'evaluated_')
+
         # Load results
         with open(file_path, 'r', encoding='utf-8') as f:
             for line in f:
@@ -53,6 +109,21 @@ def load_evaluation_results(results_dir, task):
                 agent_results[agent_name].append(result)
     
     return agent_results
+
+
+def discover_response_agents(results_dir: str, task: str) -> Dict[str, bool]:
+    """Return a mapping of agent names to True if a responses_ file exists."""
+    task_dir = os.path.join(results_dir, task)
+    if not os.path.exists(task_dir):
+        return {}
+
+    responses = {}
+    response_files = glob.glob(os.path.join(task_dir, 'responses_*.jsonl'))
+    for file_path in response_files:
+        filename = os.path.basename(file_path)
+        agent_name = _extract_agent_name(filename, 'responses_')
+        responses[agent_name] = True
+    return responses
 
 def calculate_task_statistics(agent_results, task):
     """Calculate statistics for a task"""
@@ -115,25 +186,23 @@ def calculate_task_statistics(agent_results, task):
     return stats
 
 def build_qid_category_mapping(task):
-    """Build mapping from qid to category from original dataset"""
+    """Build mapping from qid to category using dataset loaders when available."""
+    loader = DATASET_LOADERS.get(task)
+    if loader is None:
+        return {}
+
     qid_to_category = {}
-    
-    if task == 'hotpotqa':
+    try:
+        eval_set = loader()
+    except Exception as exc:  # pragma: no cover - depends on dataset availability
+        print(f"Warning: failed to load dataset for {task}: {exc}")
         return qid_to_category
-    elif task == 'locomo':
-        eval_set = load_locomo()
-    elif task == 'longmemeval':
-        eval_set = load_longmemeval()
-    elif task == 'msc':
-        eval_set = load_msc()
-    else:
-        return qid_to_category
-    
+
     for sample in eval_set:
-        for question in sample.questions:
-            if question.qid and question.category is not None:
+        for question in getattr(sample, 'questions', []):
+            if getattr(question, 'qid', None) and getattr(question, 'category', None) is not None:
                 qid_to_category[question.qid] = question.category
-    
+
     return qid_to_category
 
 def generate_overall_table(stats, task):
@@ -222,25 +291,110 @@ def generate_category_table(stats, task):
     return table
 
 def save_tables_to_file(tables, task, results_dir):
-    """Save tables to file"""
+    """Save per-task tables to file."""
     output_file = os.path.join(results_dir, task, f"statistics_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt")
-    
+
+    os.makedirs(os.path.dirname(output_file), exist_ok=True)
+
     with open(output_file, 'w', encoding='utf-8') as f:
         f.write(f"Evaluation Statistics for {task.upper()}\n")
         f.write(f"Generated at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
         f.write("=" * 80 + "\n\n")
-        
+
         for table in tables:
             if table:
                 f.write(str(table) + "\n\n")
-    
+
     print(f"Statistics saved to: {output_file}")
+
+
+def save_summary_table(summary_table: PrettyTable, results_dir: str):
+    """Persist the cross-task summary table."""
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    output_file = os.path.join(results_dir, f"summary_llm_scores_{timestamp}.txt")
+    with open(output_file, 'w', encoding='utf-8') as f:
+        f.write(f"LLM Score Summary\nGenerated at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write("=" * 80 + "\n\n")
+        f.write(str(summary_table) + "\n")
+    print(f"Summary table saved to: {output_file}")
+
+
+def generate_summary_table(summary_scores: Dict[str, Dict[str, float]], tasks: List[str]) -> Optional[PrettyTable]:
+    """Create a table with agents as rows and tasks as columns for llm_score."""
+    if not summary_scores:
+        return None
+
+    sorted_tasks = sorted(tasks)
+    table = PrettyTable()
+    table.title = "LLM Score Summary"
+    table.field_names = ['Agent'] + [task.upper() for task in sorted_tasks]
+
+    for agent in sorted(summary_scores.keys()):
+        row = [agent]
+        for task in sorted_tasks:
+            value = summary_scores[agent].get(task)
+            if value is None or value == -1:
+                row.append('-')
+            else:
+                row.append(f"{value:.4f}")
+        table.add_row(row)
+
+    return table
+
+
+def generate_response_presence_table(presence: Dict[str, Dict[str, bool]], tasks: List[str]) -> Optional[PrettyTable]:
+    """Create a table marking which agents have response files for each task."""
+    if not presence:
+        return None
+
+    sorted_tasks = sorted(tasks)
+    table = PrettyTable()
+    table.title = "Response File Availability"
+    table.field_names = ['Agent'] + [task.upper() for task in sorted_tasks]
+
+    for agent in sorted(presence.keys()):
+        row = [agent]
+        for task in sorted_tasks:
+            row.append('✓' if presence[agent].get(task) else '-')
+        table.add_row(row)
+
+    return table
+
+
+def save_response_table(response_table: PrettyTable, results_dir: str):
+    """Persist the response availability table."""
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    output_file = os.path.join(results_dir, f"summary_responses_{timestamp}.txt")
+    with open(output_file, 'w', encoding='utf-8') as f:
+        f.write(f"Response File Availability\nGenerated at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write("=" * 80 + "\n\n")
+        f.write(str(response_table) + "\n")
+    print(f"Response availability table saved to: {output_file}")
 
 def main():
     args = parse_args()
-    
-    tasks = ['locomo', 'longmemeval', 'hotpotqa', 'msc'] if args.task == 'all' else [args.task]
-    
+
+    tasks = discover_tasks(args.results_dir, args.task)
+    if not tasks:
+        print("No tasks found. Please check the results directory or --task argument.")
+        return
+
+    ignored_benchmarks, bench_ignore_path = load_bench_ignore(args.results_dir)
+    if ignored_benchmarks:
+        print(f"Skipping benchmarks from {bench_ignore_path}:", ", ".join(sorted(ignored_benchmarks)))
+        tasks = [task for task in tasks if task not in ignored_benchmarks]
+
+    if not tasks:
+        print("No tasks remain after applying .benchignore. Nothing to do.")
+        return
+
+    ignored_agents, ignore_path = load_agent_ignore(args.results_dir)
+    if ignored_agents:
+        print(f"Ignoring agents from {ignore_path}:", ", ".join(sorted(ignored_agents)))
+
+    summary_scores: Dict[str, Dict[str, float]] = defaultdict(dict)
+    response_presence: Dict[str, Dict[str, bool]] = defaultdict(dict)
+
     for task in tasks:
         print(f"\n{'='*60}")
         print(f"Generating statistics for {task.upper()}")
@@ -248,6 +402,19 @@ def main():
         
         # Load results
         agent_results = load_evaluation_results(args.results_dir, task)
+        if ignored_agents:
+            agent_results = {agent: res for agent, res in agent_results.items() if agent not in ignored_agents}
+
+        response_agents = discover_response_agents(args.results_dir, task)
+        for agent_name in response_agents:
+            if agent_name in ignored_agents:
+                continue
+            response_presence[agent_name][task] = True
+
+        for agent_name in agent_results.keys():
+            if agent_name in ignored_agents:
+                continue
+            response_presence[agent_name][task] = True
         
         if not agent_results:
             print(f"No evaluation results found for {task}")
@@ -256,6 +423,15 @@ def main():
         # Calculate statistics
         stats = calculate_task_statistics(agent_results, task)
         
+        # Update summary with llm scores
+        for agent_name, agent_stats in stats.items():
+            if agent_name in ignored_agents:
+                continue
+            llm_score = agent_stats.get('llm_score_avg')
+            if llm_score is None:
+                continue
+            summary_scores[agent_name][task] = llm_score
+
         # Generate tables
         overall_table = generate_overall_table(stats, task)
         category_table = generate_category_table(stats, task)
@@ -277,6 +453,28 @@ def main():
         print(f"\nFound {len(agent_results)} agents with results:")
         for agent, results in agent_results.items():
             print(f"  - {agent}: {len(results)} questions")
+
+    summary_table = generate_summary_table(summary_scores, tasks)
+    if summary_table:
+        print(f"\n{'='*60}")
+        print("Cross-task LLM Score Summary")
+        print(f"{'='*60}")
+        print(summary_table)
+        if args.save_txt:
+            save_summary_table(summary_table, args.results_dir)
+    else:
+        print("\nNo LLM score data available to build the summary table.")
+
+    response_table = generate_response_presence_table(response_presence, tasks)
+    if response_table:
+        print(f"\n{'='*60}")
+        print("Response File Availability")
+        print(f"{'='*60}")
+        print(response_table)
+        if args.save_txt:
+            save_response_table(response_table, args.results_dir)
+    else:
+        print("\nNo response files detected across tasks.")
 
 if __name__ == "__main__":
     main()

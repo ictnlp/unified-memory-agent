@@ -1,10 +1,11 @@
+import asyncio
 import json
 import backoff
 from openai import RateLimitError
 from .base_agent import BaseAgent, MODEL_NAME_MAP
 from typing import List, Union
 import tqdm
-
+from tqdm.asyncio import tqdm_asyncio
 
 class MemAgent(BaseAgent):
     """
@@ -105,6 +106,36 @@ Your answer:
                 error_message = self._handle_api_error(e, chunk[:100])
                 print(f"Memory update failed: {error_message}")
                 # Fallback: just append the chunk to updated memory
+                if self.updated_memory == "No previous memory":
+                    self.updated_memory = f"[Memory update failed due to API error] {chunk}"
+                else:
+                    self.updated_memory += f"\n\n[Memory update failed due to API error] {chunk}"
+
+    async def add_memory_async(self, chunk: str):
+        """Async variant of add_memory to support AsyncOpenAI clients."""
+        if not self._is_async:
+            await asyncio.to_thread(self.add_memory, chunk)
+            return
+
+        if self.concat_memory:
+            self.concat_memory += f"\n\n{chunk}"
+        else:
+            self.concat_memory = chunk
+
+        if self.wo_q:
+            try:
+                prompt_text = self.MEMORY_UPDATE_TEMPLATE_WO_Q.format(
+                    memory=self.updated_memory,
+                    chunk=chunk
+                )
+
+                messages = [{"role": "user", "content": prompt_text}]
+                response = await self._make_request_async(messages, max_tokens=2048)
+                self.updated_memory = response.strip()
+            except Exception as e:
+                print(f"Error updating memory in add_memory_async: {e}")
+                error_message = self._handle_api_error(e, chunk[:100])
+                print(f"Memory update failed: {error_message}")
                 if self.updated_memory == "No previous memory":
                     self.updated_memory = f"[Memory update failed due to API error] {chunk}"
                 else:
@@ -255,17 +286,15 @@ Your answer:
         )
         return response.choices[0].message.content
     
-    def QA(self, query: str, wo_q: bool = False) -> str:
+    def QA(self, query: str) -> str:
         """
         Answer query using memory. 
         
         Args:
             query: The question to answer
-            wo_q: If False (default), use query-aware memory processing from concat_memory
-                  If True, use pre-built updated_memory directly
         """
         try:
-            if wo_q:
+            if self.wo_q:
                 # Use version 2: pre-built updated memory (without query awareness)
                 memory_to_use = self.updated_memory
             else:
@@ -285,22 +314,20 @@ Your answer:
             
         except Exception as e:
             return self._handle_api_error(e, query)
-    
-    def QA_batch(self, queries: List[str], wo_q: bool = False, batch_size: int = 32) -> List[str]:
+
+    def QA_batch(self, queries: List[str], batch_size: int = 32) -> List[str]:
         """
         Answer multiple queries using memory.
         
         Args:
             queries: List of questions to answer
-            wo_q: If False, use query-aware memory processing
-                  If True, use direct updated memory
             batch_size: Not used, kept for compatibility
         """
         if self._is_async:
             raise RuntimeError("Use QA_batch_async() for async client")
         
         try:
-            if wo_q:
+            if self.wo_q:
                 memory_to_use = self.updated_memory
                 
                 responses = []
@@ -334,49 +361,34 @@ Your answer:
         except Exception as e:
             error_msg = self._handle_api_error(e, f"Batch queries: {queries}")
             return [error_msg] * len(queries)
-    
-    async def QA_batch_async(self, queries: List[str], wo_q: bool = False, batch_size: int = 32) -> List[str]:
+
+    async def QA_batch_async(self, queries: List[str], batch_size: int = 32) -> List[str]:
         """
         Answer multiple queries using memory asynchronously.
         
         Args:
             queries: List of questions to answer
-            wo_q: If False, use query-aware memory processing
-                  If True, use direct updated memory
             batch_size: Not used, kept for compatibility
         """
         try:
-            if wo_q:
-                memory_to_use = self.updated_memory
-                
-                responses = []
-                for query in queries:
-                    prompt_text = self.FINAL_QA_TEMPLATE.format(
-                        prompt=query,
-                        memory=memory_to_use
-                    )
-                    messages = [{"role": "user", "content": prompt_text}]
-                    response = await self._make_request_async(messages, max_tokens=1024)
-                    responses.append(response.strip())
-                
-                return responses
-            else:
-                if not queries:
-                    return []
-                
-                responses = []
-                for query in queries:
-                    processed_memory = await self._process_memory_with_query_async(query)
-                    prompt_text = self.FINAL_QA_TEMPLATE.format(
-                        prompt=query,
-                        memory=processed_memory
-                    )
-                    messages = [{"role": "user", "content": prompt_text}]
-                    response = await self._make_request_async(messages, max_tokens=1024)
-                    responses.append(response.strip())
-                
-                return responses
-                
+            if not queries:
+                return []
+            
+            sem = asyncio.Semaphore(len(queries))
+            async def handle_query(query):
+                async with sem:
+                    if self.wo_q:
+                        processed = self.updated_memory
+                    else:
+                        processed = await self._process_memory_with_query_async(query)
+                    prompt = self.FINAL_QA_TEMPLATE.format(prompt=query, memory=processed)
+                    messages = [{"role": "user", "content": prompt}]
+                    reply = await self._make_request_async(messages, max_tokens=1024)
+                    return reply.strip()
+            tasks = [handle_query(q) for q in queries]
+            responses = await tqdm_asyncio.gather(*tasks, desc="Processing batch queries", total=len(queries))
+            return responses
+
         except Exception as e:
             error_msg = self._handle_api_error(e, f"Batch queries: {queries}")
             return [error_msg] * len(queries)

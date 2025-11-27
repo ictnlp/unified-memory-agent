@@ -1,6 +1,5 @@
-from agents import BaseAgent, ConcatAgent, MemAgent, MemAlphaUnifiedAgent
-from agents.file_memory_agent import FileMemoryAgent
-from agents.emergence_agent import EmergenceAgent
+import importlib
+
 from data.EvalDataset import (
     load_locomo,
     load_longmemeval,
@@ -15,6 +14,10 @@ from data.EvalDataset import (
     load_booksum,
     load_perltqa,
     load_pubmed_rct,
+    load_synth,
+    load_squad,
+    load_infbench,
+    load_convomem,
 )
 import uuid
 from functools import partial
@@ -61,6 +64,9 @@ _DATASET_LOADERS = {
     'booksum': load_booksum,
     'perltqa': load_perltqa,
     'pubmed_rct': load_pubmed_rct,
+    'squad': load_squad,
+    'infbench': load_infbench,
+    'convomem': load_convomem,
 }
 
 class DatasetLoaders:
@@ -73,7 +79,11 @@ class DatasetLoaders:
                          num_docs=int(parts[1]),
                          num_queries=int(parts[2]),
                          num_samples=int(parts[3]))
-        return None
+        if key.startswith("synth-"):
+            parts = key.split('-')
+            return partial(load_synth,
+                           suf=parts[1])
+        raise KeyError(key)
     
     def get(self, key, default=None):
         return self.__getitem__(key) or default
@@ -83,10 +93,40 @@ class DatasetLoaders:
 
 DATASET_LOADERS = DatasetLoaders()
 
-AGENT_CLASS = {
-    'concat': ConcatAgent,
-    'memagent': MemAgent,
-    'filememory': FileMemoryAgent,
-    'emergence': EmergenceAgent,
-    'memalpha': MemAlphaUnifiedAgent,
-}
+class AgentRegistry:
+    _AGENT_SPECS = {
+        'concat': ('agents.concat_agent', 'ConcatAgent'),
+        'memagent': ('agents.mem_agent', 'MemAgent'),
+        'filememory': ('agents.file_memory_agent', 'FileMemoryAgent'),
+        'emergence': ('agents.emergence_agent', 'EmergenceAgent'),
+        'memalpha': ('agents.mem_alpha_agent', 'MemAlphaUnifiedAgent'),
+        'toolmem': ('agents.verl_agent', 'VerlMemoryAgent'),
+        'mem1': ('agents.mem1_agent', 'Mem1Agent'),
+    }
+
+    def __init__(self) -> None:
+        self._cache = {}
+
+    def __getitem__(self, key):
+        if key in self._cache:
+            return self._cache[key]
+        spec = self._AGENT_SPECS.get(key)
+        if spec is None:
+            raise KeyError(key)
+        module_name, class_name = spec
+        module = importlib.import_module(module_name)
+        agent_cls = getattr(module, class_name)
+        self._cache[key] = agent_cls
+        return agent_cls
+
+    def get(self, key, default=None):
+        try:
+            return self.__getitem__(key)
+        except KeyError:
+            return default
+
+    def __contains__(self, key):
+        return key in self._AGENT_SPECS
+
+
+AGENT_CLASS = AgentRegistry()

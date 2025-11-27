@@ -5,3 +5,5 @@ processed*
 *.parquet
 raw/
 results/
+tmp/
+*.log

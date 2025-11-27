@@ -45,7 +45,7 @@ class MemAlphaUnifiedAgent:
 
     def __init__(
         self,
-        *,
+        model_name: str = "YuWangX/Memalpha-4B",
         client=None,
         agent_config_path: Optional[str] = None,
         prompts_config_path: Optional[str] = None,
@@ -79,7 +79,7 @@ class MemAlphaUnifiedAgent:
         self._prompt_metadata: dict = {k: v for k, v in prompts.items() if k != "unified_prompt"}
 
         # Instantiate the underlying Mem-alpha agent (loads tokenizer/model once)
-        self._agent = RawMemoryAgent(agent_config=config, save_process=False, client=client)
+        self._agent = RawMemoryAgent(agent_config=config, save_process=False, client=client, model_name=model_name)
         self._max_new_tokens = config.get("max_new_tokens", self._agent.MAX_NEW_TOKENS)
 
         # Runtime state
@@ -118,24 +118,20 @@ class MemAlphaUnifiedAgent:
     # ------------------------------------------------------------------
     # Memory ingestion
     # ------------------------------------------------------------------
-    def add_memory(self, chunk: str) -> None:
+    async def add_memory_async(self, chunk: str) -> None:
         if not chunk:
             return
-
         formatted_chunk = self._format_chunk(chunk)
         self._agent.memory = self.current_memory
         self._reset_conversation_history()
 
         try:
-            self._agent.chat(user_msg=formatted_chunk, status="memorie")
+            await self._agent.chat(user_msg=formatted_chunk, status="memorie")
         except Exception as exc:  # pragma: no cover - runtime dependent
             raise RuntimeError(f"Mem-alpha memory ingestion failed: {exc}") from exc
 
         self.current_memory = self._agent.memory
         self._chunk_counter += 1
-
-    async def add_memory_async(self, chunk: str) -> None:
-        await asyncio.to_thread(self.add_memory, chunk)
 
     # ------------------------------------------------------------------
     # Question answering
@@ -143,7 +139,7 @@ class MemAlphaUnifiedAgent:
     def QA(self, query: str) -> str:
         return self.QA_batch([query])[0]
 
-    def QA_batch(self, query_list: List[str], batch_size: int = 32) -> List[str]:
+    async def QA_batch_async(self, query_list: List[str], batch_size: int = 32) -> List[str]:
         responses: List[str] = []
         for query in query_list:
             formatted_query = self._format_query(query)
@@ -151,7 +147,7 @@ class MemAlphaUnifiedAgent:
             self._reset_conversation_history()
 
             try:
-                answer = self._agent.chat(user_msg=formatted_query, status="chat")
+                answer = await self._agent.chat(user_msg=formatted_query, status="chat")
             except Exception as exc:  # pragma: no cover - runtime dependent
                 answer = f"ERROR_MEM_ALPHA_QA: {exc}"
 
@@ -160,9 +156,6 @@ class MemAlphaUnifiedAgent:
             responses.append(str(answer).strip())
         responses = [resp.split("</think>")[-1].strip() for resp in responses]
         return responses
-
-    async def QA_batch_async(self, query_list: List[str], batch_size: int = 32) -> List[str]:
-        return await asyncio.to_thread(self.QA_batch, query_list, batch_size)
 
     # ------------------------------------------------------------------
     # Helpers

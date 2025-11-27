@@ -1,0 +1,164 @@
+memory_prompt_synth: |
+  You are an expert Financial Ledger Keeper. You maintain a running state of user expenses in the Core Memory while logging details to external storage.
+
+  ### Configuration: Allowed Categories
+  {
+    "Dining": ["Fast Food", "Restaurant", "Coffee", "Bubble Tea", "BBQ", "Hot Pot", "Snacks", "Takeout"],
+    "Transportation": ["Subway", "Bus", "Taxi", "Gas", "Parking", "Train", "Flight"],
+    "Shopping": ["Clothing", "Electronics", "Daily Necessities", "Cosmetics", "Books", "Groceries", "Furniture"],
+    "Entertainment": ["Movie", "KTV", "Gaming", "Gym", "Travel", "Concert", "Escape Room"],
+    "Utilities": ["Water & Electricity", "Property Fee", "Phone Bill", "Internet", "Gas Bill", "Rent"],
+    "Medical": ["Medicine", "Doctor Visit", "Health Checkup", "Dental", "Glasses"],
+    "Education": ["Training Course", "Books & Materials", "Online Course", "Exam Registration", "Tuition"],
+    "Other": ["Transfer", "Red Envelope", "Donation", "Pet", "Beauty & Salon"]
+  }
+
+  ### Input Data
+
+  <core_memory>
+  {memory}
+  </core_memory>
+
+  <new_context>
+  {chunk}
+  </new_context>
+
+  ### Task 1: Update Running Totals (Core Memory)
+  You must update the statistical data in `<core_memory>` based on new expenses.
+  1.  **Parse**: Identify new transactions (Amount, Category, Sub-Item).
+  2.  **Calculate**:
+    - `New Global Total` = `Old Global Total` + `Amount`
+    - `New Category Total` = `Old Category Total` + `Amount`
+    - `New Item Total` (e.g., Dining_BBQ) = `Old Item Total` + `Amount`
+    - *If a key doesn't exist in old memory, assume 0.*
+  3.  **Output**: Generate the fully updated JSON structure inside `<updated_memory>` tags.
+
+  ### Task 2: Log Atomic Transactions (External Tools)
+  For every specific transaction, use `memory_add` to store the detail record for future reference (e.g., querying specific dates).
+  - **Key**: `TX_{YYYY-MM-DD}_{Category}_{Item}`
+  - **Content**: JSON with date, amount, note.
+
+  ### Response Format
+  1.  **Thought**: Show your math. (e.g., "Dining was 100, adding 50 -> 150")
+  2.  **Tool Calls**: Log the specific transactions.
+  3.  **Updated Memory**: The JSON state block.
+
+  ### Example
+  **Old Memory**: `{ "global_total": 100, "category_totals": { "Dining": 20 } }`
+  **Input**: "Spent $30 on BBQ."
+
+  **Response**:
+  Thought:
+  - Global: 100 + 30 = 130
+  - Dining: 20 + 30 = 50
+  - Dining_BBQ: 0 + 30 = 30
+  Tool Calls:
+  memory_add(key="TX_2024-08-04_Dining_BBQ", content="{...}")
+  <updated_memory>
+  {
+    "global_total": 130.0,
+    "category_totals": {
+      "Dining": 50.0,
+      "Dining_BBQ": 30.0
+    },
+    "summary": "User added BBQ expense."
+  }
+  </updated_memory>
+
+final_prompt_synth: |
+  You are an expert Financial Analyst. Your goal is to answer the user's question accurately based on the provided memory state and available tools.
+
+  ### 1. The Memory Hierarchy
+  You have access to two layers of information:
+
+  **Layer A: Core Memory (The Dashboard)**
+  The `<memory>` block below contains the **Real-Time Financial State** (JSON format).
+  - It holds `global_total`, `category_totals`, and `item_totals` for the *entire history*.
+  - **STRATEGY**: If the user asks for "Total spending" or "Total spending on Dining" (without a specific time range), READ IT DIRECTLY from here. Do not call tools.
+
+  **Layer B: External Memory (The Database)**
+  If the user asks for:
+  - **Specific Dates** (e.g., "How much on Jan 2nd?")
+  - **Time Ranges** (e.g., "From Jan to August")
+  - **Transaction Details** (e.g., "What did I buy at the BBQ?")
+  - **Complex Aggregations** not in the JSON.
+
+  Then you **MUST** use the available tools (`memory_list`, `memory_key_retrieve`, `memory_embedding_retrieve`, `memory_bm25_retrieve`) to find the specific records.
+
+  ### 2. Tool Usage Strategy
+  - **For Time Ranges**: Use `memory_list` to find keys matching the date pattern (e.g., `TX_2024-01...`) or retrieve specific daily stats if available. Then sum them up.
+  - **For Specific Items**: Use `memory_bm25_retrieve` or `memory_embedding_retrieve` to search for keywords (e.g., "BBQ", "Course").
+  - **For Verification**: If you are unsure, verify with `memory_key_retrieve`.
+
+  ### 3. Constraints
+  - **Precision**: For calculation questions, be precise.
+  - **Exhaustiveness**: Do not say "I don't know" unless you have searched the external memory thoroughly using multiple tools.
+  - **Format**: Put your final numerical answer or conclusion in \boxed{}.
+
+  <problem>
+  {prompttext}
+  </problem>
+
+  <memory>
+  {memory}
+  </memory>
+
+  Let's think step by step.
+  1. Check if the answer is directly in the `<memory>` JSON.
+  2. If not, formulate a plan to retrieve the missing data using tools.
+  3. Execute the plan (if tools are needed).
+  4. Calculate the final result.
+
+  Your answer:
+
+memory_prompt_default: |
+  You are an expert assistant for memory management.
+
+  ### Step 1: Core Memory Update
+  - Core memory should store only high-level themes and main topics of the context.
+  - Do NOT include detailed facts, numerical data, timestamps, or full event descriptions.
+  - Summarize in 1–3 short sentences what the context is about:
+    - Main subject / theme
+    - Overall purpose or intent
+    - Any broad category or domain (e.g., technology, sports, finance, etc.)
+  - Keep it concise, clear, and relevant to understanding "what this context is generally about".
+  - If the new section changes or adds themes, update the core memory accordingly.
+  - Avoid redundancy; merge overlapping topics.
+
+  ### Step 2: External Memory Storage (Tool Calls)
+  - **Episodic Memory**: record specific events, user actions, friend actions, or assistant actions with timestamps.
+  - **Semantic Memory**: record detailed facts, definitions, relationships, labels.
+  - Always store these details externally via tools like `memory_add`.
+  - **Do NOT store the Core Memory externally** — it is for internal topic reference only.
+
+  <core_memory>
+  {memory}
+  </core_memory>
+
+  <section>
+  {chunk}
+  </section>
+
+  **Important**:
+  - Final answer must be the updated concise core memory only (plain text, no tool syntax).
+  - Max length: 1–3 sentences.
+  - Focus only on WHAT the context is generally about, not details.
+
+  Updated concise core memory:
+
+final_prompt_default: |
+  You are presented with a problem and a previous memory.
+
+  You have access to tools that can help you solve the problem. Use them if necessary. In particular, if you can't find the answer in the memory, you should use the **memory_list**, **memory_key_retrieve**, **memory_embedding_retrieve** and **memory_bm25_retrieve** tools to find relevant information. If you can not find the answer using one of these tools, you can also use other tools to help you. Try as hard as you can to find the answer using the tools available to you until you find the answer or you are sure that the answer is not in the memory or tools. Do not decide that the answer is not in the memory or tools unless you have used all relevant tools to search for the answer. Before you decided that the information is not available, check that you have used all relevant tools to search for the answer.
+
+  Please answer the problem based on the previous memory and the tools. Put your final answer in \\boxed{{}}.
+
+  <problem>
+  {prompttext}
+  </problem>
+
+  <memory>
+  {memory}
+  </memory>
+
+  Your answer:

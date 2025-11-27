@@ -199,6 +199,7 @@ class EmergenceAgent(BaseAgent):
             ).choices[0].message.content
             return facts
         except Exception as e:
+            print(f"Error extracting facts: {str(e)}")
             return f"Error extracting facts: {str(e)}"
     
     def _generate_answer(self, question: str, facts: str, retrieved_turns: List[str]) -> str:
@@ -227,6 +228,7 @@ class EmergenceAgent(BaseAgent):
             ).choices[0].message.content
             return answer
         except Exception as e:
+            print(f"Error generating answer: {str(e)}")
             return f"Error generating answer: {str(e)}"
     
     def _parse_longmemeval_chunk(self, content: str) -> List[str]:
