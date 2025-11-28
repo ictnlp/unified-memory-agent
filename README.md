@@ -4,32 +4,46 @@ A comprehensive evaluation framework for testing memory-based conversational AI 
 
 ## Overview
 
-This system evaluates how well AI agents can answer questions based on accumulated conversational memory over time. It supports two main datasets:
-- **Locomo**: Focuses on multi-hop reasoning, temporal understanding, and adversarial scenarios
-- **LongmemEval**: Tests multi-session memory, knowledge updates, and preference tracking
+This system evaluates how well AI agents can answer questions based on accumulated conversational memory over time. It supports 17 benchmark datasets including:
+- **Locomo**: Multi-hop reasoning, temporal understanding, and adversarial scenarios
+- **LongmemEval**: Multi-session memory, knowledge updates, and preference tracking
+- **ConvoMem**: Long-context conversational memory with 6 evidence categories (107 test cases, 10K+ questions)
+- **MemAlpha**: Memory-intensive multi-turn conversations
+- **InfBench**: Infinite context benchmark for extremely long sequences
+- **Plus 12 more**: banking77, booksum, clinic, hotpotqa, msc, nlu, perltqa, pubmed_rct, squad, synth, trec_coarse, trec_fine
 
 ## Quick Start
 
 ### Basic Usage
 
 ```bash
-# Run full evaluation (generation + evaluation)
-python evaluate.py --task locomo --agent concat
+# Run full evaluation (generation + scoring) - async version recommended
+python evaluate_async.py --task locomo --agent concat --concurrency 256
+
+# Run with ConvoMem benchmark
+python evaluate_async.py --task convomem --agent mem --concurrency 128
 
 # Evaluate existing responses
-python evaluate.py --task locomo --input_file results/locomo/responses_concat_[timestamp].jsonl
-
-# Async version
-python evaluate_async.py --task longmemeval --agent concat --concurrency 256
+python evaluate_async.py --task locomo --input_file results/locomo/responses_concat_[timestamp].jsonl
 
 # Generate comprehensive statistics
 python generate_stats.py --task all --save_txt
+
+# Using convenience scripts
+bash run_generation.sh      # Run generation with optimized settings
+bash run_score.sh          # Run scoring on generated responses
 ```
 
 ### Supported Tasks & Agents
 
-- **Tasks**: `locomo`, `longmemeval`
-- **Agents**: `concat` (concatenates all memory chunks)
+- **Tasks**: `convomem`, `locomo`, `longmemeval`, `memalpha`, `infbench`, `hotpotqa`, `msc`, `squad`, `banking77`, `booksum`, `clinic`, `nlu`, `perltqa`, `pubmed_rct`, `synth`, `trec_coarse`, `trec_fine`
+- **Agents**:
+  - `concat`: Concatenates all memory chunks (baseline)
+  - `mem`: Advanced memory agent with structured memory management
+  - `mem1`: Variant of memory agent with specialized processing
+  - `emergence`: Emergence-based memory agent
+  - `mem_alpha`: Optimized for MemAlpha dataset
+  - `verl`: VERL (Verified Reinforcement Learning) agent
 
 ## Architecture
 
@@ -73,28 +87,60 @@ export X-CHJ-GW-SOURCE="your-source-id"
 
 ## Usage Examples
 
+### Run ConvoMem Evaluation
+```bash
+# Full pipeline with async processing
+python evaluate_async.py --task convomem --agent mem --concurrency 128
+
+# Using convenience script
+bash run_generation.sh
+```
+
 ### Run Locomo Evaluation
 ```bash
-python evaluate.py --task locomo --agent concat --output_dir results/
+python evaluate_async.py --task locomo --agent concat --concurrency 256 --output_dir results/
 ```
 
 ### Run LongmemEval Evaluation
 ```bash
-python evaluate.py --task longmemeval --agent concat
+python evaluate_async.py --task longmemeval --agent mem
 ```
 
 ### Generate Statistics Report
 ```bash
-python generate_stats.py --task locomo --save_txt --output_file stats_report.txt
+# Single task
+python generate_stats.py --task convomem --save_txt --output_file stats_convomem.txt
+
+# All tasks
+python generate_stats.py --task all --save_txt
 ```
 
 ### Batch Processing
 ```bash
-# Run both tasks sequentially
-python evaluate.py --task locomo --agent concat && python evaluate.py --task longmemeval --agent concat
+# Run multiple benchmarks
+for task in convomem locomo longmemeval memalpha; do
+    python evaluate_async.py --task $task --agent mem --concurrency 256
+done
+
+# Or use the convenience script
+bash run_generation.sh
+bash run_score.sh
 ```
 
 ## Dataset Details
+
+### ConvoMem Dataset (NEW)
+- **Test Cases**: 107 long-context conversations (>2.18M characters each)
+- **Questions**: 10,215 total across 6 evidence categories
+- **Categories**:
+  - `abstention_evidence`: 2,100 questions
+  - `assistant_facts_evidence`: 2,111 questions
+  - `implicit_connection_evidence`: 574 questions
+  - `preference_evidence`: 4,982 questions
+  - `user_evidence`: 448 questions
+  - `changing_evidence`: Additional evidence type
+- **Source**: Pre-mixed test cases from ConvoMem core benchmark
+- **Focus**: Long-context memory retention and evidence-based question answering
 
 ### Locomo Dataset
 - **Categories**: Multi-hop (1), Temporal (3), Open-domain (4), Single-hop (2), Adversarial (5)
@@ -102,13 +148,23 @@ python evaluate.py --task locomo --agent concat && python evaluate.py --task lon
 - **Metrics**: Category-specific F1 scoring
 
 ### LongmemEval Dataset
-- **Question Types**: 
+- **Question Types**:
   - Multi-session memory
   - Temporal reasoning
   - Knowledge updates
   - Single-session preferences
   - Abstention scenarios
 - **Evaluation**: Template-based LLM scoring
+
+### MemAlpha Dataset
+- **Focus**: Memory-intensive multi-turn conversations
+- **Format**: Structured memory updates and retrieval
+- **Challenges**: Long-term memory consistency
+
+### InfBench Dataset
+- **Focus**: Extremely long context understanding
+- **Challenge**: Maintaining performance with infinite context
+- **Use Case**: Testing context window limits
 
 ## Output Files
 
@@ -159,10 +215,50 @@ class CustomAgent(BaseAgent):
 
 ### Adding New Datasets
 
-1. Create dataset loader following `EvalDataset.py` pattern
+1. Create dataset loader in `data/EvalDataset.py` using the `@register_benchmark()` decorator
 2. Implement category mapping
 3. Add evaluation logic
 4. Update statistics generation
+
+Example:
+```python
+@register_benchmark()
+def load_custom_dataset(force_rebuild=False) -> list[EvalData]:
+    """Load custom dataset."""
+    file_path = "data/processed_custom.json"
+    if os.path.exists(file_path) and not force_rebuild:
+        return load_from_path(file_path)
+
+    # Process raw data
+    processed = []
+    # ... your data loading logic
+
+    json.dump([item.model_dump() for item in processed],
+              open(file_path, "w"), indent=4, ensure_ascii=False)
+    return processed
+```
+
+## Available Benchmarks
+
+The system currently supports 17 benchmarks (use `--task <benchmark_name>`):
+
+1. **convomem** - Long-context conversational memory (107 cases, 10K+ questions)
+2. **locomo** - Multi-hop reasoning and adversarial scenarios
+3. **longmemeval** - Multi-session memory tracking
+4. **memalpha** - Memory-intensive conversations
+5. **infbench** - Infinite context benchmark
+6. **hotpotqa** - Multi-hop question answering
+7. **msc** - Multi-session conversations
+8. **squad** - Reading comprehension
+9. **banking77** - Banking intent classification
+10. **booksum** - Book summarization
+11. **clinic** - Clinical text understanding
+12. **nlu** - Natural language understanding tasks
+13. **perltqa** - Long-form QA
+14. **pubmed_rct** - Medical research abstracts
+15. **synth** - Synthetic conversational data
+16. **trec_coarse** - TREC question classification (coarse)
+17. **trec_fine** - TREC question classification (fine)
 
 ## Troubleshooting
 
