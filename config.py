@@ -25,6 +25,7 @@ from functools import partial
 from dotenv import load_dotenv
 load_dotenv(".env") # 默认会找项目根目录的 .env
 import os
+import httpx
 
 # Configuration
 API_CONFIG = {
@@ -43,7 +44,21 @@ JUDGE_MODEL_NAME = "azure-gpt-4o"
 API_CONFIG_LOCAL = {
     "base_url": "http://127.0.0.1:8000/v1",
     "api_key": "EMPTY",
-    "max_retries": 100
+    "max_retries": 3,  # 降低重试次数，快速失败
+    "timeout": 180.0,  # 增加到3分钟，应对长推理
+    "http_client": httpx.AsyncClient(
+        limits=httpx.Limits(
+            max_connections=500,           # 增加连接池
+            max_keepalive_connections=200, # 增加保活连接
+            keepalive_expiry=2.0           # ✅ 空闲2秒回收，不影响运行中的请求
+        ),
+        timeout=httpx.Timeout(
+            180.0,        # ✅ 总超时3分钟，允许长推理
+            connect=5.0,  # ✅ 连接建立5秒超时，快速发现连接问题
+            read=180.0,   # ✅ 读取超时3分钟
+            write=10.0    # 写入超时10秒
+        )
+    )
 }
 MODEL_NAME = "Qwen/Qwen3-8B"
 
@@ -99,9 +114,11 @@ class AgentRegistry:
         'memagent': ('agents.mem_agent', 'MemAgent'),
         'filememory': ('agents.file_memory_agent', 'FileMemoryAgent'),
         'emergence': ('agents.emergence_agent', 'EmergenceAgent'),
+        'rag': ('agents.rag_agent', 'RAGAgent'),
         'memalpha': ('agents.mem_alpha_agent', 'MemAlphaUnifiedAgent'),
         'toolmem': ('agents.verl_agent', 'VerlMemoryAgent'),
         'mem1': ('agents.mem1_agent', 'Mem1Agent'),
+        'gam': ('agents.gam_agent', 'GAMAgent'),
     }
 
     def __init__(self) -> None:

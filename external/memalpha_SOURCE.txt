@@ -1,0 +1,25 @@
+Source: Mem-alpha
+Original Path: /mnt/pfs-guan-ssai/nlu/zhangkehao/Mem-alpha
+Copied Date: 2025-12-04
+
+Included:
+- agent.py (core MemoryAgent implementation, modified with truncation)
+- memory.py (Memory class)
+- functions.py (utility functions)
+- config/ (configuration YAML files)
+- memalpha/ (subpackage with llm_agent utilities)
+- requirements.txt, README.md (documentation)
+
+Excluded:
+- main.py, evaluate_agent_results.py (evaluation scripts - duplicated in this project)
+- long_context_eval.py (evaluation script)
+- data/ (datasets - handled separately in this project)
+- agents/ (model checkpoints)
+- .venv/ (virtual environment)
+- verl/ (verl submodule - handled separately)
+- MEM1/ (handled separately as mem1)
+- scripts/, data_preprocess/ (utility scripts)
+
+Notes:
+- agent.py has been modified to add MAX_CHARS truncation (42000 chars)
+- Used by mem_alpha_agent.py wrapper

@@ -12,12 +12,11 @@ from transformers import AutoTokenizer
 
 from .base_agent import BaseAgent, MODEL_NAME_MAP
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-VERL_ROOT = PROJECT_ROOT.parent / "verl"
+# Path constants
+PROJECT_ROOT = Path(__file__).resolve().parents[1]  # unified-memory-agent root
+VERL_ROOT = PROJECT_ROOT / "external" / "verl"      # verl in external/
 
-if VERL_ROOT.exists() and str(VERL_ROOT) not in sys.path:
-    sys.path.append(str(VERL_ROOT))
-
+# Import verl components (path managed by agents/__init__.py)
 from verl.experimental.agent_loop.agent_loop import _DummyConfig  # type: ignore
 from verl.experimental.agent_loop.tool_mem_agent_loop import ToolMemoryAgentLoop  # type: ignore
 from verl.workers.rollout.replica import TokenOutput  # type: ignore
@@ -51,7 +50,8 @@ class ClientCompletionsServerManager:
         prompt_text = self._tokenizer.decode(prompt_ids, skip_special_tokens=False)
         max_tokens = int(sampling_params.get("max_tokens", 4096))
         temperature = float(sampling_params.get("temperature", 0.0))
-        response = await self._create_completion(prompt_text, max_tokens, temperature)
+        stop = sampling_params.get("stop", None)
+        response = await self._create_completion(prompt_text, max_tokens, temperature, stop=stop)
         self.calls += 1
 
         choice = response[0]
@@ -70,7 +70,7 @@ class ClientCompletionsServerManager:
 
         return TokenOutput(token_ids=token_ids, log_probs=supplied_logprobs)
 
-    async def _create_completion(self, prompt: str, max_tokens: int, temperature: float) -> List[dict[str, Any]]:
+    async def _create_completion(self, prompt: str, max_tokens: int, temperature: float, stop: list[str] | None = None) -> List[dict[str, Any]]:
         model = self._model_name
         if hasattr(self._client, "completions"):
             if self._is_async:
@@ -79,6 +79,7 @@ class ClientCompletionsServerManager:
                     prompt=prompt,
                     max_tokens=max_tokens,
                     temperature=temperature,
+                    stop=stop,
                     logprobs=1,
                 )
             else:
@@ -88,6 +89,7 @@ class ClientCompletionsServerManager:
                         prompt=prompt,
                         max_tokens=max_tokens,
                         temperature=temperature,
+                        stop=stop,
                         logprobs=1,
                     )
 
@@ -109,6 +111,7 @@ class ClientCompletionsServerManager:
                 model=model,
                 messages=messages,
                 max_tokens=max_tokens,
+                stop=stop,
                 temperature=temperature,
             )
         else:
@@ -117,6 +120,7 @@ class ClientCompletionsServerManager:
                     model=model,
                     messages=messages,
                     max_tokens=max_tokens,
+                    stop=stop,
                     temperature=temperature,
                 )
 
@@ -154,7 +158,7 @@ class VerlMemoryAgent(BaseAgent):
         self._agent_config = agent_config or {}
         self._is_async = hasattr(self.client, "__class__") and "Async" in self.client.__class__.__name__
         self._resolved_model = MODEL_NAME_MAP.get(self.model_name, self.model_name)
-        self._tokenizer = AutoTokenizer.from_pretrained(self._resolved_model)
+        self._tokenizer = AutoTokenizer.from_pretrained(self._resolved_model, fix_mistral_regex=True)
         self._config = self._build_config(self._agent_config)
         ToolMemoryAgentLoop.init_class(self._config, self._tokenizer, None)
         self._memory_dir = Path(self._agent_config.get("memory_dir", PROJECT_ROOT / "tmp" / "verl_agent"))
@@ -205,7 +209,9 @@ class VerlMemoryAgent(BaseAgent):
         if not chunk:
             return
         # self._context_chunks.append(chunk)
-        self._context_chunks.extend(chunk.splitlines())
+        # Filter out empty strings from splitlines to avoid warnings in EmbeddingRetrievalTool
+        lines = [line for line in chunk.splitlines() if line.strip()]
+        self._context_chunks.extend(lines)
         self._context = "\n\n".join(self._context_chunks)
 
     async def add_memory_async(self, chunk: str) -> None:
@@ -223,9 +229,9 @@ class VerlMemoryAgent(BaseAgent):
     def QA_batch(self, query_list: List[str], batch_size: int = 32) -> List[str]:
         if self._is_async:
             raise RuntimeError("Use QA_batch_async() when the client is asynchronous")
-        return asyncio.run(self.QA_batch_async(query_list, batch_size=batch_size))
+        return asyncio.run(self.QA_batch_async(query_list))
 
-    async def QA_batch_async(self, query_list: List[str], batch_size: int = 32) -> List[str]:
+    async def QA_batch_async(self, query_list: List[str]) -> List[str]:
         if not query_list:
             return []
         raw_result = await self._run_agent_loop(query_list)
@@ -286,6 +292,7 @@ class VerlMemoryAgent(BaseAgent):
             "temperature": 0.0,
             "max_tokens": self._max_response_tokens,
             "repetition_penalty": 1.05,
+            # "stop": ["</tool_call>"],
         }
 
         try:

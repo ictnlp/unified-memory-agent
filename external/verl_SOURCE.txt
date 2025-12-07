@@ -1,0 +1,34 @@
+Source: verl (Reinforcement Learning Training Library for LLMs)
+Original Path: /mnt/pfs-guan-ssai/nlu/zhangkehao/verl
+Copied Date: 2025-12-04
+Git Commit: fa924a43c7ceafa5a37539e12a9fb505279fe56b
+
+Included:
+- verl/ (core library, 293 Python files)
+  - trainer/ (training algorithms and orchestration)
+  - workers/ (distributed workers: actor, critic, rollout, reward)
+  - single_controller/ (Ray-based distributed computing)
+  - models/ (model implementations)
+  - tools/ (tool integration for multi-turn training)
+  - utils/ (utilities and helpers)
+- .venv/ (9.2GB, Python 3.12.10 virtual environment)
+  - All dependencies pre-installed
+  - Paths updated to new location
+- examples/ (training examples and scripts)
+- recipe/ (advanced algorithm implementations)
+- memagent/ (memory agent training code)
+- docs/ (documentation)
+- All configuration files and scripts
+
+Excluded:
+- checkpoints/ (637GB) - Model checkpoints
+- swanlog/ (221MB) - Training logs
+- swanlog_lpai/ (1.1GB) - Training logs
+- outputs/ (5MB) - Output files
+- .git/ (13MB) - Git history
+
+Notes:
+- Virtual environment has been updated for new path
+- To use: source external/verl/.venv/bin/activate
+- Used by verl_agent.py for RL training and evaluation
+- Original checkpoints location: /mnt/pfs-guan-ssai/nlu/zhangkehao/verl/checkpoints/

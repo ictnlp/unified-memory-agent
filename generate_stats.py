@@ -275,9 +275,10 @@ def generate_category_table(stats, task):
     columns = ['Agent', 'Category', 'Count'] + [m.upper() for m in metric_types]
     table.field_names = columns
 
-    for agent_name in sorted(stats.keys()):  # Sort agent names
-        categories = stats[agent_name].get('categories', {})
-        for category in sorted(all_categories):
+    # Group by category first, then by agent for easier comparison
+    for category in sorted(all_categories):
+        for agent_name in sorted(stats.keys()):  # Sort agent names
+            categories = stats[agent_name].get('categories', {})
             if category in categories:
                 cat_stats = categories[category]
                 # Use first metric type to get count (all should have same count)

@@ -17,22 +17,17 @@ from typing import TYPE_CHECKING, Any, List, Optional
 
 from .base_agent import BaseAgent
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-MEM1_ROOT = PROJECT_ROOT.parent / "Mem-alpha" / "MEM1" / "Mem1"
-
-if MEM1_ROOT.exists() and str(MEM1_ROOT / "inference") not in sys.path:
-    sys.path.append(str(MEM1_ROOT / "inference"))
-
+# Import MEM1 components (path managed by agents/__init__.py)
 if TYPE_CHECKING:  # pragma: no cover - static typing only
-    from data_pipelines import Mem1Pipeline  # type: ignore
+    from inference.data_pipelines import Mem1Pipeline  # type: ignore
 else:
     try:
-        pipelines_module = importlib.import_module("data_pipelines")
+        pipelines_module = importlib.import_module("inference.data_pipelines")
         Mem1Pipeline = pipelines_module.Mem1Pipeline
     except ImportError as exc:  # pragma: no cover - import guard
         raise ImportError(
-            "Failed to import MEM1 modules. Ensure the MEM1 project is available "
-            "at Mem-alpha/MEM1/Mem1 and its dependencies are installed."
+            "Failed to import MEM1 modules. Ensure external/mem1 is available "
+            "and its dependencies are installed."
         ) from exc
 
 DEFAULT_QA_TASK = "Remember all the information and be ready to answer questions."
@@ -193,13 +188,12 @@ class Mem1Agent(BaseAgent):
         # Mark that memory needs to be rebuilt
         self._memory_built = False
 
-    async def QA_batch_async(self, query_list: List[str], batch_size: int = 32) -> List[str]:
+    async def QA_batch_async(self, query_list: List[str]) -> List[str]:
         """
         Answer multiple questions based on accumulated memory.
 
         Args:
             query_list: List of questions
-            batch_size: Batch size for processing (currently processes individually)
 
         Returns:
             List of answers
@@ -212,7 +206,46 @@ class Mem1Agent(BaseAgent):
         results = []
         for query in query_list:
             try:
-                answer = await self._qa_with_mem1_client_async(query)
+                # Extract text from <think> tags if present
+                memory_text = self._current_memory
+                if "<think>" in memory_text:
+                    memory_text = memory_text.replace("<think>", "").replace("</think>", "").strip()
+
+                if not memory_text:
+                    print("Warning: No memory built, cannot answer question")
+
+                # MEM1 style prompt: task + memory + question
+                qa_prompt = f"""{self.qa_task}
+
+{memory_text}
+
+{query}"""
+
+                # Call qa_client
+                response = await self.qa_client.chat.completions.create(
+                    model=self.qa_model_name,
+                    messages=[{"role": "user", "content": qa_prompt}],
+                    temperature=self.temperature,
+                    max_tokens=2048
+                )
+                answer = response.choices[0].message.content
+
+                # Clean up response
+                answer = answer.strip()
+                if answer.startswith("Error:"):
+                    answer = f"ERROR_MEM1_QA: {answer}"
+                # Handle thinking tags if present in answer
+                elif "</think>" in answer:
+                    answer = answer.split("</think>")[-1].strip()
+                elif "<think>" in answer and "</think>" not in answer:
+                    answer = f"ERROR_THINK_LENGTH_EXCEEDED: The think is too long. Think: {answer[:100]}..."
+
+                # Extract answer from tags if present
+                if "<answer>" in answer and "</answer>" in answer:
+                    extracted = re.findall(r'<answer>(.*?)</answer>', answer, re.DOTALL)
+                    if extracted:
+                        answer = extracted[0].strip()
+
                 results.append(answer)
             except Exception as e:
                 results.append(self._handle_api_error(e, query))
@@ -232,55 +265,3 @@ class Mem1Agent(BaseAgent):
         )
         self._memory_built = True
 
-    async def _qa_with_mem1_client_async(self, query: str) -> str:
-        """Answer question using QA client (runs in thread pool)."""
-        return await asyncio.to_thread(self._qa_with_mem1_client_sync, query)
-
-    async def _qa_with_client_async(self, qa_prompt: str) -> str:
-        """Async QA call using qa_client."""
-        response = await self.qa_client.chat.completions.create(
-            model=self.qa_model_name,
-            messages=[{"role": "user", "content": qa_prompt}],
-            temperature=self.temperature,
-            max_tokens=2048
-        )
-        return response.choices[0].message.content
-
-    def _qa_with_mem1_client_sync(self, query: str) -> str:
-        """Synchronous QA using qa_client (for thread pool execution)."""
-        # Extract text from <think> tags if present
-        memory_text = self._current_memory
-        if "<think>" in memory_text:
-            memory_text = memory_text.replace("<think>", "").replace("</think>", "").strip()
-
-        if not memory_text:
-            print("Warning: No memory built, cannot answer question")
-
-        # MEM1 style prompt: task + memory + question
-        qa_prompt = f"""{self.qa_task}
-
-{memory_text}
-
-{query}"""
-
-        # Use qa_client with asyncio.run since this is called in thread pool
-        response = asyncio.run(self._qa_with_client_async(qa_prompt))
-
-        # Clean up response
-        answer = response.strip()
-        if answer.startswith("Error:"):
-            return f"ERROR_MEM1_QA: {answer}"
-
-        # Handle thinking tags if present in answer
-        if "</think>" in answer:
-            answer = answer.split("</think>")[-1].strip()
-        elif "<think>" in answer and "</think>" not in answer:
-            return f"ERROR_THINK_LENGTH_EXCEEDED: The think is too long. Think: {answer[:100]}..."
-
-        # Extract answer from tags if present
-        if "<answer>" in answer and "</answer>" in answer:
-            answer = re.findall(r'<answer>(.*?)</answer>', answer, re.DOTALL)
-            if answer:
-                return answer[0].strip()
-
-        return answer

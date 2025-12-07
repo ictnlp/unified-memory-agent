@@ -98,7 +98,7 @@ class ConcatAgent(BaseAgent):
     async def QA_batch_async(
         self,
         query_list: list[str],
-        batch_size: int=32
+        batch_size: int=5
     ) -> list[str]:
         if len(query_list) == 1:
             return [await self.QA_async(query_list[0])]
@@ -106,7 +106,32 @@ class ConcatAgent(BaseAgent):
         res = []
         for batch_idx in range(0, len(query_list), batch_size):
             query_batch = query_list[batch_idx : batch_idx+batch_size]
-            prompt = f"Your memory:\n{context}\n\n{QA_PROMPT_BATCH}{"\n".join(["%s: %s" % (k, q) for k, q in enumerate(query_batch)])}"
+
+            # Build the query part (without context)
+            query_part = f"{QA_PROMPT_BATCH}{'\n'.join(['%s: %s' % (k, q) for k, q in enumerate(query_batch)])}"
+
+            # Check total length and truncate context if needed
+            # 262144 tokens ≈ 786432 chars (1 token ≈ 3 chars)
+            # Reserve for output: len(query_batch) * 2048 tokens
+            # Reserve for query part and safety margin
+            # MAX_INPUT_CHARS = 786432 - (len(query_batch) * 2048 * 3) - 10000  # Reserve for output and safety
+
+            # 128k窗口
+            MAX_INPUT_CHARS = 393216 - (len(query_batch) * 2048 * 3) - 10000
+            # 16k窗口
+            # MAX_INPUT_CHARS = 49152 - (len(query_batch) * 2048 * 3) - 10000
+
+            query_part_chars = len(query_part)
+            context_available_chars = MAX_INPUT_CHARS - query_part_chars - 100  # Extra safety margin
+
+            # Truncate context if needed (keep the end, remove from the beginning)
+            if len(context) > context_available_chars:
+                print(f"[WARNING] Context too long ({len(context)} chars), truncating to {context_available_chars} chars (keeping recent memory)")
+                context_truncated = "...[Earlier memory truncated]...\n\n" + context[-context_available_chars:]
+            else:
+                context_truncated = context
+
+            prompt = f"Your memory:\n{context_truncated}\n\n{query_part}"
 
             model = MODEL_NAME_MAP.get(self.model_name, self.model_name)
             retries = 0
@@ -118,7 +143,7 @@ class ConcatAgent(BaseAgent):
                         messages=[
                             {"role": "user", "content": prompt}
                         ],
-                        max_tokens=2048 * batch_size,
+                        max_tokens=2048 * len(query_batch),
                         temperature=0.7
                     )
                     response_str = response.choices[0].message.content
@@ -136,10 +161,10 @@ class ConcatAgent(BaseAgent):
                     continue
                 except Exception as e:
                     error_msg = self._handle_api_error(e, f"Batch queries: {query_batch}")
-                    print(f"API Error in batch {batch_idx//batch_size + 1}: {error_msg}")
+                    print(f"Concat Agent: API Error in batch {batch_idx//batch_size + 1}: {error_msg}")
                     retries += 1
                     continue
-            
+
             # Parse results for this batch
             if reformat_response is None:
                 # All retries failed, add error messages for this batch

@@ -7,8 +7,17 @@ import pandas as pd
 
 CONV_START_PROMPT = "Below is a conversation between {} and {}.\n\n"
 
-MEMALPHA_PARQUET_PATH = "/mnt/pfs-guan-ssai/nlu/zhangkehao/Mem-alpha/data/memalpha/test.parquet"
-MEMORYAGENTBENCH_PARQUET_PATH = "/mnt/pfs-guan-ssai/nlu/zhangkehao/Mem-alpha/data/memoryagentbench/test.parquet"
+# Data paths - can be overridden by environment variables
+# Default paths point to original Mem-alpha data location
+# On new machines, set MEMALPHA_DATA_DIR environment variable or copy data files
+MEMALPHA_PARQUET_PATH = os.getenv(
+    "MEMALPHA_PARQUET_PATH",
+    "/mnt/pfs-guan-ssai/nlu/zhangkehao/Mem-alpha/data/memalpha/test.parquet"
+)
+MEMORYAGENTBENCH_PARQUET_PATH = os.getenv(
+    "MEMORYAGENTBENCH_PARQUET_PATH",
+    "/mnt/pfs-guan-ssai/nlu/zhangkehao/Mem-alpha/data/memoryagentbench/test.parquet"
+)
 
 BenchmarkRegistry = dict[str, Callable[..., list["EvalData"]]]
 BENCHMARK_REGISTRY: BenchmarkRegistry = {}

@@ -9,11 +9,7 @@ from typing import TYPE_CHECKING, List, Optional
 
 import yaml
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-MEM_ALPHA_ROOT = PROJECT_ROOT / "Mem-alpha"
-if MEM_ALPHA_ROOT.exists() and str(MEM_ALPHA_ROOT) not in sys.path:
-    sys.path.append(str(MEM_ALPHA_ROOT))
-
+# Import Mem-alpha components (path managed by agents/__init__.py)
 if TYPE_CHECKING:  # pragma: no cover - static typing only
     from agent import MemoryAgent as RawMemoryAgent  # type: ignore
     from memory import Memory  # type: ignore
@@ -23,7 +19,7 @@ else:
         Memory = importlib.import_module("memory").Memory
     except ImportError as exc:  # pragma: no cover - import guard
         raise ImportError(
-            "Failed to import Mem-alpha modules. Ensure the Mem-alpha project is available "
+            "Failed to import Mem-alpha modules. Ensure external/memalpha is available "
             "and its dependencies are installed."
         ) from exc
 
@@ -139,7 +135,7 @@ class MemAlphaUnifiedAgent:
     def QA(self, query: str) -> str:
         return self.QA_batch([query])[0]
 
-    async def QA_batch_async(self, query_list: List[str], batch_size: int = 32) -> List[str]:
+    async def QA_batch_async(self, query_list: List[str]) -> List[str]:
         responses: List[str] = []
         for query in query_list:
             formatted_query = self._format_query(query)

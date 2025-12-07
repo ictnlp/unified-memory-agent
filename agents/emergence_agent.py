@@ -164,7 +164,7 @@ class EmergenceAgent(BaseAgent):
         except Exception as e:
             return f"Error: {str(e)}"
     
-    async def QA_batch_async(self, queries: List[str], batch_size: int = 32) -> List[str]:
+    async def QA_batch_async(self, queries: List[str]) -> List[str]:
         """异步批量回答问题"""
         results = []
         for query in queries:

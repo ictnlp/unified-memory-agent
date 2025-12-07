@@ -1,0 +1,25 @@
+tools:
+  - class_name: "verl.tools.memory.mem_tool.AddTool"
+    config: 
+      type: native
+  - class_name: "verl.tools.memory.mem_tool.UpdateTool"
+    config: 
+      type: native
+  - class_name: "verl.tools.memory.mem_tool.DeleteTool"
+    config: 
+      type: native
+  - class_name: "verl.tools.memory.mem_tool.RetrieveTool"
+    config: 
+      type: native
+  - class_name: "verl.tools.memory.mem_tool.ListTool"
+    config: 
+      type: native
+  - class_name: "verl.tools.memory.mem_tool.RankBM25RetrievalTool"
+    config: 
+      type: native
+  - class_name: "verl.tools.memory.mem_tool.EmbeddingRetrievalTool"
+    config: 
+      type: native
+  # - class_name: "verl.tools.memory.mem_tool.FinalAnswerTool"
+  #   config: 
+  #     type: native

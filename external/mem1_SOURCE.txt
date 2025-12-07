@@ -1,0 +1,19 @@
+Source: MEM1 (part of Mem-alpha)
+Original Path: /mnt/pfs-guan-ssai/nlu/zhangkehao/Mem-alpha/MEM1/Mem1/inference/
+Copied Date: 2025-12-04
+
+Included:
+- inference/ (complete directory with all Python files)
+  - data_pipelines.py (Mem1Pipeline class)
+  - models.py (model handling)
+  - eval.py (evaluation utilities)
+  - generate_rollout.py (generation utilities)
+  - start_vllm.sh (vllm startup script)
+  - __init__.py, README.md
+
+Excluded:
+- Other MEM1 directories (only inference/ is needed)
+
+Notes:
+- Used by mem1_agent.py wrapper
+- Requires VLLM server for inference

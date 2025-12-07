@@ -1,0 +1,13 @@
+checkpoints/
+.venv/
+swanlog_lpai/
+swanlog/
+.git/
+outputs/
+*.log
+*.jsonl
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+*.egg-info/

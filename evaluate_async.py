@@ -455,10 +455,10 @@ async def process_single_sample(sample, agent, output_file, task, semaphore, wri
             # Process questions at this position
             questions_at_position = position_groups[position]
             queries = [q.query for q in questions_at_position]
-            
+
             # Time the QA batch processing
             batch_start_time = time.time()
-            responses = await agent.QA_batch_async(queries, batch_size=5)
+            responses = await agent.QA_batch_async(queries)
             batch_end_time = time.time()
             batch_duration = batch_end_time - batch_start_time
             
@@ -549,6 +549,7 @@ async def generate_responses_async(task, agent_class, agent_config, agent_id, ou
             agent = agent_class(model_name=model_name, client=client, data_source={
                 "synth-s1": "synth",
                 "synth-s3": "synth",
+                "synth-s10": "synth",
                 "synth-s50": "synth",
                 "booksum": "memalpha_booksum",
                 "nlu": "memalpha_icl_nlu_8296shot_balance",
@@ -662,8 +663,10 @@ async def evaluate_responses_async(input_file, task, output_dir, agent_id="unkno
     elif os.path.exists(results_file):
         print(f"Found existing evaluation file: {results_file}")
         needs_rerun = False
+        evaluated_count = 0
         with open(results_file, 'r', encoding='utf-8') as f:
             for idx, line in enumerate(f, 1):
+                evaluated_count += 1
                 try:
                     result = json.loads(line)
                 except json.JSONDecodeError as exc:
@@ -691,6 +694,11 @@ async def evaluate_responses_async(input_file, task, output_dir, agent_id="unkno
                         print(f"Found incomplete metrics for qid {qid}: missing/invalid {missing_metrics}")
                     needs_rerun = True
                     # Don't break - continue collecting valid metrics
+
+        # Check if the number of evaluated responses matches the number of input responses
+        if evaluated_count != len(responses):
+            print(f"Number mismatch: {evaluated_count} evaluated vs {len(responses)} input responses. Will re-run evaluation")
+            needs_rerun = True
 
         if needs_rerun:
             if existing_metrics_map:
@@ -767,8 +775,9 @@ def get_args():
     parser.add_argument('--agent', type=str, default='emergence')
     parser.add_argument('--agent_id', type=str, default=None, help='Agent name for output files (default: agent type)')
     default_agent_cfg_path = (
-        Path(__file__).resolve().parents[1]
-        / 'Mem-alpha'
+        Path(__file__).resolve().parent
+        / 'external'
+        / 'memalpha'
         / 'config'
         / 'memalpha-qwen3-4b_agent_0.05-0.1.yaml'
     )
@@ -776,8 +785,9 @@ def get_args():
     parser.add_argument('--agent_config_path', type=str, default=default_agent_cfg,
                         help='Optional agent configuration file (used by memalpha agent)')
     default_prompts_cfg_path = (
-        Path(__file__).resolve().parents[1]
-        / 'Mem-alpha'
+        Path(__file__).resolve().parent
+        / 'external'
+        / 'memalpha'
         / 'config'
         / 'prompts_wrt_datasource.yaml'
     )

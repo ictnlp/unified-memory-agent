@@ -3,15 +3,16 @@ CUDA_VISIBLE_DEVICES=0,1,2,3
 cd /mnt/pfs-guan-ssai/nlu/zhangkehao/unified-memory-agent
 source /mnt/pfs-guan-ssai/nlu/zhangkehao/.venv/bin/activate
 
-# until curl -s http://localhost:8000/health > /dev/null 2>&1; do
-#     sleep 2
-#     echo "wait for vllm server"
-# done
+until curl -s http://localhost:8000/health > /dev/null 2>&1; do
+    sleep 2
+    echo "wait for vllm server"
+done
 
-for AGENT in base concat emergence mem1 memagent memagent_woq memalphav1 toolmem513 toolmemv1
+# for AGENT in base concat emergence mem1 memagent memagent_woq memalphav1 toolmem513 toolmemv1 rag
+for AGENT in base
 do
-    # for TASK in synth-s1 synth-s3 synth-s50 banking77 booksum clinic hotpotqa locomo longmemeval msc nlu perltqa pubmed_rct trec_coarse trec_fine squad infbench
-    for TASK in booksum infbench
+    # for TASK in synth-s10 synth-s1 synth-s3 synth-s50 banking77 booksum clinic hotpotqa locomo longmemeval msc nlu perltqa pubmed_rct trec_coarse trec_fine squad infbench convomem
+    for TASK in msc
     do
         INPUT_FILE="results/qwen3-4b/$TASK/responses_${AGENT}.jsonl"
         OUTPUT_DIR="results/qwen3-4b/$TASK"

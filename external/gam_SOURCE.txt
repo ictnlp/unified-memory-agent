@@ -1,0 +1,20 @@
+Source: general-agentic-memory (GAM Framework)
+Original Path: /mnt/pfs-guan-ssai/nlu/zhangkehao/general-agentic-memory
+Copied Date: 2025-12-04
+Git Commit: e93af1dca6197731abe4e3eaa6897d45b32f85ea
+
+Included:
+- gam/ (core package with agents, generator, retriever, schemas, prompts)
+- requirements.txt, LICENSE, README.md (documentation)
+
+Excluded:
+- examples/ (example scripts)
+- eval/ (evaluation code)
+- scripts/ (utility scripts)
+- download_data/ (data download scripts)
+- tmp/ (temporary files)
+- .git/ (version control)
+
+Notes:
+- This is the core GAM framework used by gam_agent.py
+- Modified files: gam/agents/memory_agent.py, gam/agents/research_agent.py (async support)

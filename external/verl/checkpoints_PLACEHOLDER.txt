@@ -1,0 +1,4 @@
+The checkpoints/ directory (637GB) was excluded from this copy.
+Original location: /mnt/pfs-guan-ssai/nlu/zhangkehao/verl/checkpoints/
+
+This directory contains trained model checkpoints which are too large for version control.

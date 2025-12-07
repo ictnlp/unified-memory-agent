@@ -7,3 +7,19 @@ raw/
 results/
 tmp/
 *.log
+
+# External dependencies
+external/*/.venv/
+external/*/__pycache__/
+external/*/tmp/
+external/*/.pytest_cache/
+
+# Backup files
+agents.backup.*
+.claude/
+diagnose_*.py
+deduplicate_*.py
+test_*.py
+stats.txt
+check_*.py
+TODO

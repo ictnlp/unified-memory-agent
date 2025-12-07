@@ -362,7 +362,7 @@ Your answer:
             error_msg = self._handle_api_error(e, f"Batch queries: {queries}")
             return [error_msg] * len(queries)
 
-    async def QA_batch_async(self, queries: List[str], batch_size: int = 32) -> List[str]:
+    async def QA_batch_async(self, queries: List[str]) -> List[str]:
         """
         Answer multiple queries using memory asynchronously.
         
