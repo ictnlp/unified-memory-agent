@@ -230,11 +230,12 @@ def compute_advantage(
         # Initialize the mask for GRPO calculation
         grpo_calculation_mask = data.batch["response_mask"]
         # Call compute_grpo_outcome_advantage with parameters matching its definition
+        index_list = np.array([f"{x}_{y}" for x, y in zip(data.non_tensor_batch["uid"], data.non_tensor_batch["is_final"])], dtype=object)
         advantages, returns = core_algos.compute_grpo_outcome_advantage(
             token_level_rewards=data.batch["token_level_rewards"],
             response_mask=grpo_calculation_mask,
             # index=data.non_tensor_batch["uid"],
-            index=data.non_tensor_batch['is_final'],
+            index=index_list,
             norm_adv_by_std_in_grpo=norm_adv_by_std_in_grpo,
         )
         data.batch["advantages"] = advantages

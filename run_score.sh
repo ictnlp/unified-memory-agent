@@ -9,10 +9,9 @@ until curl -s http://localhost:8000/health > /dev/null 2>&1; do
 done
 
 # for AGENT in base concat emergence mem1 memagent memagent_woq memalphav1 toolmem513 toolmemv1 rag
-for AGENT in base
+for AGENT in toolmem600v3fixfix
 do
-    # for TASK in synth-s10 synth-s1 synth-s3 synth-s50 banking77 booksum clinic hotpotqa locomo longmemeval msc nlu perltqa pubmed_rct trec_coarse trec_fine squad infbench convomem
-    for TASK in msc
+    for TASK in synth-s10 synth-s1 synth-s3 synth-s50 banking77 booksum clinic hotpotqa locomo longmemeval msc nlu perltqa pubmed_rct trec_coarse trec_fine squad infbench convomem
     do
         INPUT_FILE="results/qwen3-4b/$TASK/responses_${AGENT}.jsonl"
         OUTPUT_DIR="results/qwen3-4b/$TASK"
@@ -25,3 +24,9 @@ do
         fi
     done
 done
+
+# python evaluate_async.py \
+#     --task synth-s10 \
+#     --concurrency 256 \
+#     --input_file "results/qwen3-30b/synth-s10/responses_base.jsonl" \
+#     --output_dir "results/qwen3-30b/synth-s10"

@@ -12,13 +12,13 @@ export PROMPT_TEMPLATE_PATH="/mnt/pfs-guan-ssai/nlu/zhangkehao/unified-memory-ag
 
 python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=grpo \
-    data.train_batch_size=32 \
+    data.train_batch_size=2 \
     data.max_prompt_length=8192 \
     data.max_response_length=8192 \
     data.filter_overlong_prompts=True \
     data.truncation='error' \
     data.return_raw_chat=True \
-    actor_rollout_ref.model.path=Qwen/Qwen3-4B-Instruct-2507 \
+    actor_rollout_ref.model.path=/mnt/pfs-guan-ssai/nlu/zhangkehao/unified-memory-agent/external/verl/checkpoints/tool_memagent/qwen3-4b_GRPO_extend_datav3/global_step_600/hf \
     actor_rollout_ref.actor.optim.lr=1e-6 \
     actor_rollout_ref.model.use_remove_padding=True \
     actor_rollout_ref.actor.use_dynamic_bsz=True \
@@ -35,7 +35,7 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
     actor_rollout_ref.rollout.name=sglang \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.85 \
-    actor_rollout_ref.rollout.n=16 \
+    actor_rollout_ref.rollout.n=8 \
     actor_rollout_ref.ref.log_prob_max_token_len_per_gpu=32768 \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
     actor_rollout_ref.rollout.over_sample_rate=0.1 \
@@ -45,24 +45,25 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.rollout.multi_turn.max_assistant_turns=10 \
     actor_rollout_ref.rollout.multi_turn.max_parallel_calls=10 \
     actor_rollout_ref.rollout.multi_turn.max_tool_response_length=3000 \
+    actor_rollout_ref.rollout.multi_turn.tool_response_truncate_side=left \
     actor_rollout_ref.rollout.multi_turn.format=hermes \
-    algorithm.use_kl_in_reward=False \
-    algorithm.norm_adv_by_std_in_grpo=False \
+    algorithm.use_kl_in_reward=True \
     trainer.critic_warmup=0 \
     trainer.logger='["console","swanlab"]' \
     trainer.project_name='tool_memagent' \
-    trainer.experiment_name='qwen3-4b_DrGRPO_extend' \
+    trainer.experiment_name='qwen3-4b_GRPO_extend_datav3_debug' \
     trainer.n_gpus_per_node=8 \
     trainer.nnodes=1 \
-    trainer.save_freq=10 \
+    trainer.save_freq=20 \
     trainer.test_freq=10 \
-    trainer.val_before_train=False \
-    trainer.total_epochs=1 \
+    trainer.val_before_train=True \
+    trainer.total_epochs=3 \
     data.train_files="['/mnt/pfs-guan-ssai/nlu/zhangkehao/unified-memory-agent/data/memalpha_train_verl.parquet', \
-                        '/mnt/pfs-guan-ssai/nlu/zhangkehao/MemAgent_minimal/taskutils/memory_data/hotpotqa_train_mem_agent_loop_chunk2000.parquet', \
-                        '/mnt/pfs-guan-ssai/nlu/zhangkehao/unified-memory-agent/data/locomo_train_verl.parquet']" \
-    data.val_files="['/mnt/pfs-guan-ssai/nlu/zhangkehao/MemAgent_minimal/taskutils/memory_data/hotpotqa_dev_mem_agent_loop_chunk2000.parquet']" \
-    custom_reward_function.path=/mnt/pfs-guan-ssai/nlu/zhangkehao/unified-memory-agent/external/verl/memagent/hotpotqa.py \
+                    '/mnt/pfs-guan-ssai/nlu/zhangkehao/MemAgent_minimal/taskutils/memory_data/hotpotqa_train_mem_agent_loop_chunk2000.parquet', \
+                    '/mnt/pfs-guan-ssai/nlu/zhangkehao/unified-memory-agent/data/locomo_train_verl.parquet', \
+                    '/mnt/pfs-guan-ssai/nlu/zhangkehao/unified-memory-agent/data/synth_train_verl.parquet']" \
+    data.val_files="['/mnt/pfs-guan-ssai/nlu/zhangkehao/unified-memory-agent/data/memalpha_dev_verl_small_nlu.parquet']" \
+    custom_reward_function.path=/mnt/pfs-guan-ssai/nlu/zhangkehao/verl/memagent/hotpotqa.py \
     custom_reward_function.name=reward_func $@
 
 # 在parquet数据里指定用哪个agent loop

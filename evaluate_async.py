@@ -458,7 +458,7 @@ async def process_single_sample(sample, agent, output_file, task, semaphore, wri
 
             # Time the QA batch processing
             batch_start_time = time.time()
-            responses = await agent.QA_batch_async(queries)
+            responses, outputs = await agent.QA_batch_async(queries)
             batch_end_time = time.time()
             batch_duration = batch_end_time - batch_start_time
             

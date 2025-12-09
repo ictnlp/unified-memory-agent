@@ -72,69 +72,22 @@ class ClientCompletionsServerManager:
 
     async def _create_completion(self, prompt: str, max_tokens: int, temperature: float, stop: list[str] | None = None) -> List[dict[str, Any]]:
         model = self._model_name
-        if hasattr(self._client, "completions"):
-            if self._is_async:
-                response = await self._client.completions.create(
-                    model=model,
-                    prompt=prompt,
-                    max_tokens=max_tokens,
-                    temperature=temperature,
-                    stop=stop,
-                    logprobs=1,
-                )
-            else:
-                def _request() -> Any:
-                    return self._client.completions.create(
-                        model=model,
-                        prompt=prompt,
-                        max_tokens=max_tokens,
-                        temperature=temperature,
-                        stop=stop,
-                        logprobs=1,
-                    )
-
-                response = await asyncio.to_thread(_request)
-            choice = response.choices[0]
-            token_logprobs = []
-            if getattr(choice, "logprobs", None) and getattr(choice.logprobs, "token_logprobs", None):
-                token_logprobs = list(choice.logprobs.token_logprobs)
-            return [
-                {
-                    "text": choice.text,
-                    "logprobs": token_logprobs,
-                }
-            ]
-
-        messages = [{"role": "user", "content": prompt}]
-        if self._is_async:
-            response = await self._client.chat.completions.create(
-                model=model,
-                messages=messages,
-                max_tokens=max_tokens,
-                stop=stop,
-                temperature=temperature,
-            )
-        else:
-            def _request_chat() -> Any:
-                return self._client.chat.completions.create(
-                    model=model,
-                    messages=messages,
-                    max_tokens=max_tokens,
-                    stop=stop,
-                    temperature=temperature,
-                )
-
-            response = await asyncio.to_thread(_request_chat)
-
+        response = await self._client.completions.create(
+            model=model,
+            prompt=prompt,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            stop=stop,
+            logprobs=1,
+            extra_body={"skip_special_tokens": False, "include_stop_str_in_output": True},
+        )
         choice = response.choices[0]
-        text = getattr(choice.message, "content", "") if hasattr(choice, "message") else ""
-        logprob_payload = getattr(choice, "logprobs", None)
         token_logprobs = []
-        if logprob_payload and getattr(logprob_payload, "token_logprobs", None):
-            token_logprobs = list(logprob_payload.token_logprobs)
+        if getattr(choice, "logprobs", None) and getattr(choice.logprobs, "token_logprobs", None):
+            token_logprobs = list(choice.logprobs.token_logprobs)
         return [
             {
-                "text": text,
+                "text": choice.text,
                 "logprobs": token_logprobs,
             }
         ]
@@ -208,10 +161,10 @@ class VerlMemoryAgent(BaseAgent):
     def add_memory(self, chunk: str) -> None:
         if not chunk:
             return
-        # self._context_chunks.append(chunk)
+        self._context_chunks.append(chunk)
         # Filter out empty strings from splitlines to avoid warnings in EmbeddingRetrievalTool
-        lines = [line for line in chunk.splitlines() if line.strip()]
-        self._context_chunks.extend(lines)
+        # lines = [line for line in chunk.splitlines() if line.strip()]
+        # self._context_chunks.extend(lines)
         self._context = "\n\n".join(self._context_chunks)
 
     async def add_memory_async(self, chunk: str) -> None:
@@ -234,7 +187,7 @@ class VerlMemoryAgent(BaseAgent):
     async def QA_batch_async(self, query_list: List[str]) -> List[str]:
         if not query_list:
             return []
-        raw_result = await self._run_agent_loop(query_list)
+        raw_result, outputs = await self._run_agent_loop(query_list)
         results = [str(resp).split("</tool_response>\nassistant")[-1].strip() for resp in raw_result]
         def try_remove_boxed(r: str) -> str:
             if not isinstance(r, str):
@@ -272,7 +225,7 @@ class VerlMemoryAgent(BaseAgent):
                 return extracted.strip()
             return r[-2000:]  # return last 2000 chars as fallback
         results = [try_remove_boxed(r) for r in results]
-        return results
+        return results, outputs
 
     async def _run_agent_loop(self, queries: Sequence[str]) -> List[str]:
         server_manager = ClientCompletionsServerManager(
@@ -287,7 +240,8 @@ class VerlMemoryAgent(BaseAgent):
             processor=None,
         )
 
-        memory_store_path = self._memory_dir / f"memory_store_{uuid4().hex}.jsonl"
+        # memory_store_path = self._memory_dir / f"memory_store_{uuid4().hex}.jsonl"
+        memory_store_path = self._memory_dir / f"memory_store.jsonl"
         sampling_params = {
             "temperature": 0.0,
             "max_tokens": self._max_response_tokens,
@@ -322,7 +276,7 @@ class VerlMemoryAgent(BaseAgent):
                     decoded = self._tokenizer.decode(output.response_ids, skip_special_tokens=True)
                     response_list.append(decoded)
 
-        return response_list
+        return response_list, outputs
 
     def _build_tool_kwargs(self, memory_store_path: Path) -> dict[str, Any]:
         filename = str(memory_store_path)

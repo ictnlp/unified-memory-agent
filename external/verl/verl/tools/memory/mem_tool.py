@@ -60,13 +60,13 @@ class AddTool(BaseTool):
     
     async def create(self, **kwargs) -> str:
         """Create a new memory session."""
-        session_id = kwargs.get("create_kwargs", {}).get('session_id', str(uuid4()))
+        trajectory_id = kwargs.get("create_kwargs", {}).get('trajectory_id', str(uuid4()))
         filename = kwargs.get("create_kwargs", {}).get("filename", "memory_store.jsonl")
-        filename = filename[:-6] + f"_{session_id}.jsonl"
-        self._instance_dict[session_id] = {
+        filename = filename[:-6] + f"_{trajectory_id}.jsonl"
+        self._instance_dict[trajectory_id] = {
             "filename": filename
         }
-        return session_id, ToolResponse()
+        return trajectory_id, ToolResponse()
     
     @rollout_trace_op
     async def execute(
@@ -109,8 +109,9 @@ class AddTool(BaseTool):
             metrics = {}
         return ToolResponse(text=response), reward, metrics
 
-    async def release(self, instance_id: str, **kwargs) -> None:
-        del self._instance_dict[instance_id]
+    async def release(self, instance_id: str) -> None:
+        if instance_id in self._instance_dict:
+            del self._instance_dict[instance_id]
 
 class UpdateTool(BaseTool):
     """Update an existing memory entry by title, optionally renaming it."""
@@ -149,13 +150,13 @@ class UpdateTool(BaseTool):
     
     async def create(self, **kwargs) -> str:
         """Create a new memory session."""
-        session_id = kwargs.get("create_kwargs", {}).get('session_id', str(uuid4()))
+        trajectory_id = kwargs.get("create_kwargs", {}).get('trajectory_id', str(uuid4()))
         filename = kwargs.get("create_kwargs", {}).get("filename", "memory_store.jsonl")
-        filename = filename[:-6] + f"_{session_id}.jsonl"
-        self._instance_dict[session_id] = {
+        filename = filename[:-6] + f"_{trajectory_id}.jsonl"
+        self._instance_dict[trajectory_id] = {
             "filename": filename
         }
-        return session_id, ToolResponse()
+        return trajectory_id, ToolResponse()
     
     @rollout_trace_op
     async def execute(
@@ -231,8 +232,9 @@ class UpdateTool(BaseTool):
                 metrics = {}
         return ToolResponse(text=response), reward, metrics
     
-    async def release(self, instance_id: str, **kwargs) -> None:
-        del self._instance_dict[instance_id]
+    async def release(self, instance_id: str) -> None:
+        if instance_id in self._instance_dict:
+            del self._instance_dict[instance_id]
 
 class DeleteTool(BaseTool):
     """Delete a stored memory entry using its title."""
@@ -263,13 +265,13 @@ class DeleteTool(BaseTool):
     
     async def create(self, **kwargs) -> str:
         """Create a new memory session."""
-        session_id = kwargs.get("create_kwargs", {}).get('session_id', str(uuid4()))
+        trajectory_id = kwargs.get("create_kwargs", {}).get('trajectory_id', str(uuid4()))
         filename = kwargs.get("create_kwargs", {}).get("filename", "memory_store.jsonl")
-        filename = filename[:-6] + f"_{session_id}.jsonl"
-        self._instance_dict[session_id] = {
+        filename = filename[:-6] + f"_{trajectory_id}.jsonl"
+        self._instance_dict[trajectory_id] = {
             "filename": filename
         }
-        return session_id, ToolResponse()
+        return trajectory_id, ToolResponse()
     
     @rollout_trace_op
     async def execute(
@@ -318,8 +320,9 @@ class DeleteTool(BaseTool):
             metrics = {}
         return ToolResponse(text=response), reward, metrics
     
-    async def release(self, instance_id: str, **kwargs) -> None:
-        del self._instance_dict[instance_id]
+    async def release(self, instance_id: str) -> None:
+        if instance_id in self._instance_dict:
+            del self._instance_dict[instance_id]
 
 class RetrieveTool(BaseTool):
     """Retrieve the content of a memory entry by title."""
@@ -350,13 +353,13 @@ class RetrieveTool(BaseTool):
     
     async def create(self, **kwargs) -> str:
         """Create a new memory session."""
-        session_id = kwargs.get("create_kwargs", {}).get('session_id', str(uuid4()))
+        trajectory_id = kwargs.get("create_kwargs", {}).get('trajectory_id', str(uuid4()))
         filename = kwargs.get("create_kwargs", {}).get("filename", "memory_store.jsonl")
-        filename = filename[:-6] + f"_{session_id}.jsonl"
-        self._instance_dict[session_id] = {
+        filename = filename[:-6] + f"_{trajectory_id}.jsonl"
+        self._instance_dict[trajectory_id] = {
             "filename": filename
         }
-        return session_id, ToolResponse()
+        return trajectory_id, ToolResponse()
     
     @rollout_trace_op
     async def execute(
@@ -401,8 +404,9 @@ class RetrieveTool(BaseTool):
             metrics = {}
         return ToolResponse(text=response), reward, metrics
     
-    async def release(self, instance_id: str, **kwargs) -> None:
-        del self._instance_dict[instance_id]
+    async def release(self, instance_id: str) -> None:
+        if instance_id in self._instance_dict:
+            del self._instance_dict[instance_id]
 
 class ListTool(BaseTool):
     """List all stored memory titles with short content previews."""
@@ -428,13 +432,13 @@ class ListTool(BaseTool):
     
     async def create(self, **kwargs) -> str:
         """Create a new memory session."""
-        session_id = kwargs.get("create_kwargs", {}).get('session_id', str(uuid4()))
+        trajectory_id = kwargs.get("create_kwargs", {}).get('trajectory_id', str(uuid4()))
         filename = kwargs.get("create_kwargs", {}).get("filename", "memory_store.jsonl")
-        filename = filename[:-6] + f"_{session_id}.jsonl"
-        self._instance_dict[session_id] = {
+        filename = filename[:-6] + f"_{trajectory_id}.jsonl"
+        self._instance_dict[trajectory_id] = {
             "filename": filename
         }
-        return session_id, ToolResponse()
+        return trajectory_id, ToolResponse()
     
     @rollout_trace_op
     async def execute(
@@ -482,8 +486,9 @@ class ListTool(BaseTool):
             metrics = {}
         return ToolResponse(text=response), reward, metrics
 
-    async def release(self, instance_id: str, **kwargs) -> None:
-        del self._instance_dict[instance_id]
+    async def release(self, instance_id: str) -> None:
+        if instance_id in self._instance_dict:
+            del self._instance_dict[instance_id]
 
 class RankBM25RetrievalTool(BaseTool):
     """In-memory BM25检索工具，支持简单语料构建与相关文档返回。"""
@@ -519,9 +524,8 @@ class RankBM25RetrievalTool(BaseTool):
             ),
         )
 
-    async def create(self, instance_id: Optional[str] = None, **kwargs) -> tuple[str, ToolResponse]:
-        if instance_id is None:
-            instance_id = kwargs.get("create_kwargs", {}).get('session_id', str(uuid4()))
+    async def create(self, **kwargs) -> tuple[str, ToolResponse]:
+        trajectory_id = kwargs.get("create_kwargs", {}).get('trajectory_id', str(uuid4()))
 
         create_cfg = kwargs.get("create_kwargs") or kwargs
         chunks = create_cfg.get("chunks") if create_cfg else None
@@ -541,24 +545,24 @@ class RankBM25RetrievalTool(BaseTool):
                 documents.append(chunk)
                 tokenized.append(tokens)
 
-        if not hasattr(self, "_instance_state"):
-            self._instance_state: Dict[str, Dict[str, Any]] = {}
+        if not hasattr(self, "_instance_dict"):
+            self._instance_dict: Dict[str, Dict[str, Any]] = {}
 
         bm25 = BM25Okapi(tokenized) if tokenized else None
-        self._instance_state[instance_id] = {
+        self._instance_dict[trajectory_id] = {
             "documents": documents,
             "tokens": tokenized,
             "bm25": bm25,
         }
 
         if not documents:
-            logger.warning("RankBM25RetrievalTool instance %s initialized with empty chunks", instance_id)
+            logger.warning("RankBM25RetrievalTool instance %s initialized with empty chunks", trajectory_id)
 
-        return instance_id, ToolResponse()
+        return trajectory_id, ToolResponse()
 
     @rollout_trace_op
     async def execute(self, instance_id: str, arguments: Dict[str, Any], **kwargs) -> Tuple[str, float, Dict[str, Any]]:
-        state = getattr(self, "_instance_state", {}).get(instance_id)
+        state = getattr(self, "_instance_dict", {}).get(instance_id)
         if state is None:
             error_msg = f"Instance '{instance_id}' not initialized."
             logger.warning("[RankBM25RetrievalTool] %s", error_msg)
@@ -609,10 +613,9 @@ class RankBM25RetrievalTool(BaseTool):
         }
         return ToolResponse(text=json.dumps(response_payload, ensure_ascii=False)), 1, metrics
 
-    async def release(self, instance_id: str, **kwargs) -> None:
-        if hasattr(self, "_instance_state") and instance_id in self._instance_state:
-            del self._instance_state[instance_id]
-        return
+    async def release(self, instance_id: str) -> None:
+        if instance_id in self._instance_dict:
+            del self._instance_dict[instance_id]
 
     def _tokenize(self, text: str) -> List[str]:
         translator = str.maketrans("", "", string.punctuation)
@@ -662,11 +665,10 @@ class EmbeddingRetrievalTool(BaseTool):
             ),
         )
 
-    async def create(self, instance_id: Optional[str] = None, **kwargs) -> tuple[str, ToolResponse]:
-        if instance_id is None:
-            instance_id = kwargs.get("create_kwargs", {}).get('session_id', str(uuid4()))
-        if instance_id in self._instance_dict:
-            return instance_id, ToolResponse()
+    async def create(self, **kwargs) -> tuple[str, ToolResponse]:
+        trajectory_id = kwargs.get("create_kwargs", {}).get('trajectory_id', str(uuid4()))
+        if trajectory_id in self._instance_dict:
+            return trajectory_id, ToolResponse()
         chunks = kwargs.get("create_kwargs", {}).get("chunks")
         if chunks is None:
             chunks = []
@@ -686,21 +688,21 @@ class EmbeddingRetrievalTool(BaseTool):
         if documents:
             embeddings = await self._fetch_embeddings(documents)
         else:
-            logger.warning("EmbeddingRetrievalTool instance %s initialized with no valid chunks", instance_id)
+            logger.warning("EmbeddingRetrievalTool instance %s initialized with no valid chunks", trajectory_id)
 
-        if not hasattr(self, "_instance_state"):
-            self._instance_state: Dict[str, Dict[str, Any]] = {}
+        if not hasattr(self, "_instance_dict"):
+            self._instance_dict: Dict[str, Dict[str, Any]] = {}
 
-        self._instance_state[instance_id] = {
+        self._instance_dict[trajectory_id] = {
             "documents": documents,
             "embeddings": embeddings,
         }
 
-        return instance_id, ToolResponse()
+        return trajectory_id, ToolResponse()
 
     @rollout_trace_op
     async def execute(self, instance_id: str, arguments: Dict[str, Any], **kwargs) -> Tuple[str, float, Dict[str, Any]]:
-        state = getattr(self, "_instance_state", {}).get(instance_id)
+        state = getattr(self, "_instance_dict", {}).get(instance_id)
         if state is None:
             error_msg = f"实例 '{instance_id}' 尚未初始化。"
             logger.warning("[EmbeddingRetrievalTool] %s", error_msg)
@@ -746,10 +748,9 @@ class EmbeddingRetrievalTool(BaseTool):
         }
         return ToolResponse(text=json.dumps(response_payload, ensure_ascii=False)), 1, metrics
 
-    async def release(self, instance_id: str, **kwargs) -> None:
-        if hasattr(self, "_instance_state") and instance_id in self._instance_state:
-            del self._instance_state[instance_id]
-        return
+    async def release(self, instance_id: str) -> None:
+        if instance_id in self._instance_dict:
+            del self._instance_dict[instance_id]
 
     async def _fetch_embeddings_deprecated(self, texts: List[str]) -> torch.Tensor:
         if not texts:

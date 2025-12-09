@@ -36,13 +36,13 @@ done
 #     done
 # done
 
-for TASK in hotpotqa synth-s10 synth-s1 synth-s3 synth-s50 banking77 booksum clinic hotpotqa locomo longmemeval msc nlu perltqa pubmed_rct trec_coarse trec_fine squad infbench convomem
+for TASK in synth-s10 synth-s1 synth-s3 synth-s50 banking77 booksum clinic hotpotqa locomo longmemeval msc nlu perltqa pubmed_rct trec_coarse trec_fine squad infbench convomem
 do
     python evaluate_async.py \
         --task $TASK \
         --agent toolmem \
-        --agent_id toolmem600v3 \
-        --model /mnt/pfs-guan-ssai/nlu/zhangkehao/verl/checkpoints/tool_memagent/qwen3-4b_GRPO_extend_datav3/global_step_600/hf \
+        --agent_id toolmem600v3fixfix \
+        --model /mnt/pfs-guan-ssai/nlu/zhangkehao/unified-memory-agent/external/verl/checkpoints/tool_memagent/qwen3-4b_GRPO_extend_datav3/global_step_600/hf \
         --concurrency 50 \
         --output_dir results/qwen3-4b/$TASK \
         --generate_only

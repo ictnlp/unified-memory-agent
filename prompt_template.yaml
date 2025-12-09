@@ -23,46 +23,83 @@ memory_prompt_synth: |
   {chunk}
   </new_context>
 
-  ### Task 1: Update Running Totals (Core Memory)
-  You must update the statistical data in `<core_memory>` based on new expenses.
-  1.  **Parse**: Identify new transactions (Amount, Category, Sub-Item).
-  2.  **Calculate**:
-    - `New Global Total` = `Old Global Total` + `Amount`
-    - `New Category Total` = `Old Category Total` + `Amount`
-    - `New Item Total` (e.g., Dining_BBQ) = `Old Item Total` + `Amount`
-    - *If a key doesn't exist in old memory, assume 0.*
-  3.  **Output**: Generate the fully updated JSON structure inside `<updated_memory>` tags.
+  ### Task 1: Log Atomic Transactions (External Tools)
+  1. **Parse**: The new_context contains the transactions of a few days, you need to identify all the new transactions every day (Date, Category, Amount).
+  2. Use `memory_list` to get all the keys stored so far.
+  3. For every specific transaction, you need to update 3 kinds of records in external memory:
+    - **Key**: {YYYY-MM-DD}_{Category}_Amount, **Value**: a number.
+      If this key exists in the list from step 2, use `memory_key_retrieve` and the key `{YYYY-MM-DD}_{Category}_Amount` to acquire the previous total amount for that date and category if needed (If it already shows in the list then you don't need to do this), update the amount by adding the new transaction amount to the existing amount, and use `memory_update` to update the old record.
+      If not found, it means the amount of this category on that day is 0 so far, use `memory_add` and the key `{YYYY-MM-DD}_{Category}_Amount` to store the record.
+    - **Key**: {YYYY-MM-DD}_LargestSingleTransactionAmount, **Value**: a number.
+      Similarly, check if this key exists. If it does, retrieve the previous largest single transaction amount for that date, compare it with the new transaction amount, and update it if the new amount is larger. If not found, add a new record with the new transaction amount.
+    - **Key**: {YYYY-MM-DD}_TotalAmount, **Value**: a number.
+      Check if this key exists. If it does, retrieve the previous total amount for that date, add the new transaction amount to it, and update the record. If not found, add a new record with the new transaction amount.
+  For example
+  2024-08-04_Dining_Amount: 30.0
+  2024-08-04_Education_Amount: 20.0
+  2024-08-04_Medical_Amount: 150.0
+  2024-08-04_LargestSingleTransactionAmount: 70.0
+  2024-08-04_TotalAmount: 200.0
 
-  ### Task 2: Log Atomic Transactions (External Tools)
-  For every specific transaction, use `memory_add` to store the detail record for future reference (e.g., querying specific dates).
-  - **Key**: `TX_{YYYY-MM-DD}_{Category}_{Item}`
-  - **Content**: JSON with date, amount, note.
-
-  ### Response Format
-  1.  **Thought**: Show your math. (e.g., "Dining was 100, adding 50 -> 150")
-  2.  **Tool Calls**: Log the specific transactions.
-  3.  **Updated Memory**: The JSON state block.
+  ### Task 2: Update Running Totals (Core Memory, No Tools)
+  After you finish Task 1, you must update the statistical data in `<core_memory>` based on new expenses without using any tool.
+  You need to add up all the new transactions identified in Task 1 and sum it with the old GlobalTotalAmount in the core memory to get the new GlobalTotalAmount. If the core memory does not exist, assume it is 0.
+  Finally, output the updated core memory.
+  - **Key**: GlobalTotalAmount, **Value**: a number.
+    The total amount spent across all categories so far.
 
   ### Example
-  **Old Memory**: `{ "global_total": 100, "category_totals": { "Dining": 20 } }`
-  **Input**: "Spent $30 on BBQ."
+  **Old Core Memory**: 
+  <core_memory>
+  GlobalTotalAmount: 100.0
+  </core_memory>
+
+  **Input**: '[2024-05-27] User said, "I spent $30 on BBQ."'
 
   **Response**:
-  Thought:
-  - Global: 100 + 30 = 130
-  - Dining: 20 + 30 = 50
-  - Dining_BBQ: 0 + 30 = 30
-  Tool Calls:
-  memory_add(key="TX_2024-08-04_Dining_BBQ", content="{...}")
-  <updated_memory>
+  <think>
+  All the new transactions:
+  - Date: 2024-05-27, Category: Dining, Amount: 30.0
+  </think>
+  <tool_call>
   {
-    "global_total": 130.0,
-    "category_totals": {
-      "Dining": 50.0,
-      "Dining_BBQ": 30.0
-    },
-    "summary": "User added BBQ expense."
+    "name": "memory_list",
+    "arguments": {}
   }
+  </tool_call>
+  <tool_response>
+  No memory entries found.
+  </tool_response>
+  <tool_call>
+  {
+    "name": "memory_add",
+    "arguments": {
+      "title": "2024-05-27_Dining_Amount",
+      "content": "30.0"
+    }
+  }
+  </tool_call>
+  <tool_call>
+  {
+    "name": "memory_add",
+    "arguments": {
+      "title": "2024-05-27_LargestSingleTransactionAmount",
+      "content": "30.0"
+    }
+  }
+  </tool_call>
+  <tool_call>
+  {
+    "name": "memory_add",
+    "arguments": {
+      "title": "2024-05-27_TotalAmount",
+      "content": "30.0"
+    }
+  }
+  </tool_call>
+  All the new transactions add up to 30.0. The old GlobalTotalAmount is 100.0, so the updated GlobalTotalAmount is 130.0.
+  <updated_memory>
+  GlobalTotalAmount: 130.0
   </updated_memory>
 
 final_prompt_synth: |
@@ -86,7 +123,7 @@ final_prompt_synth: |
   Then you **MUST** use the available tools (`memory_list`, `memory_key_retrieve`, `memory_embedding_retrieve`, `memory_bm25_retrieve`) to find the specific records.
 
   ### 2. Tool Usage Strategy
-  - **For Time Ranges**: Use `memory_list` to find keys matching the date pattern (e.g., `TX_2024-01...`) or retrieve specific daily stats if available. Then sum them up.
+  - **For Time Ranges**: Use `memory_list` to find keys matching the date pattern (e.g., `2024-01...`) or retrieve specific daily stats if available. Then sum them up.
   - **For Specific Items**: Use `memory_bm25_retrieve` or `memory_embedding_retrieve` to search for keywords (e.g., "BBQ", "Course").
   - **For Verification**: If you are unsure, verify with `memory_key_retrieve`.
 

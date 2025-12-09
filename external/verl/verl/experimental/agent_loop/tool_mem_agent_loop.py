@@ -326,7 +326,8 @@ class ToolMemoryAgentLoop(AgentLoopBase):
             await self._process_memory_chunk(agent_data, sampling_params, kwargs.get('verbose'), trajectory_id, data_source)
         # Generate final response with tool support
         await self._process_final_response(agent_data, sampling_params, kwargs.get('verbose'), trajectory_id, data_source)
-
+        for tool in self.tools.values():
+            await tool.release(trajectory_id)
         # Create a list of AgentLoopOutput objects, one for each conversation
         outputs = []
         for i, conversation in enumerate(agent_data.conversations):
@@ -440,7 +441,7 @@ class ToolMemoryAgentLoop(AgentLoopBase):
         else:
             return AgentState.TERMINATED
 
-    async def _handle_processing_tools_state(self, agent_data: AgentData, session_id: str) -> AgentState:
+    async def _handle_processing_tools_state(self, agent_data: AgentData, trajectory_id: str) -> AgentState:
         """Handle the processing tools state: execute tool calls and prepare tool responses."""
         # Build a list of (original_index, call_type, data) for all tool calls in original order
         all_calls = []
@@ -464,7 +465,7 @@ class ToolMemoryAgentLoop(AgentLoopBase):
         tasks = []
         for call_type, call_data in all_calls:
             if call_type == 'success':
-                tasks.append(self._call_tool(call_data, agent_data.tools_kwargs, session_id=session_id))
+                tasks.append(self._call_tool(call_data, agent_data.tools_kwargs, trajectory_id=trajectory_id))
         
         # Execute all successful tools in parallel
         with simple_timer("tool_calls", agent_data.metrics):
@@ -546,7 +547,7 @@ class ToolMemoryAgentLoop(AgentLoopBase):
         
         agent_data.memory_content = response_text
 
-    async def _call_tool(self, tool_call: FunctionCall, tools_kwargs: dict[str, Any], session_id: str) -> ToolResponse:
+    async def _call_tool(self, tool_call: FunctionCall, tools_kwargs: dict[str, Any], trajectory_id: str) -> ToolResponse:
         """Call tool and return tool response."""
         tool, instance_id = None, None
         try:
@@ -555,15 +556,12 @@ class ToolMemoryAgentLoop(AgentLoopBase):
             tool = self.tools[tool_name]
             kwargs = tools_kwargs.get(tool_name, {})
             create_kwargs = kwargs.get("create_kwargs", {})
-            create_kwargs['session_id'] = session_id
+            create_kwargs['trajectory_id'] = trajectory_id
             instance_id, _ = await tool.create(create_kwargs=create_kwargs)
             tool_execution_response, tool_reward, res = await tool.execute(instance_id, tool_args)
         except Exception as e:
             logger.warning(f"Error when executing {tool_name} tool: {e}")
             return ToolResponse(text=f"Error when executing {tool_name} tool: {e}"), 0.0, {}
-        finally:
-            if tool and instance_id:
-                await tool.release(instance_id)
 
         tool_response_text = tool_execution_response.text
         if tool_response_text and len(tool_response_text) > self.max_tool_response_length:

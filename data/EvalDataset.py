@@ -22,20 +22,21 @@ MEMORYAGENTBENCH_PARQUET_PATH = os.getenv(
 BenchmarkRegistry = dict[str, Callable[..., list["EvalData"]]]
 BENCHMARK_REGISTRY: BenchmarkRegistry = {}
 
-CLASSIFICATION_TASK_HINT = (
-    "Task: This is a classification sample. Respond only with the correct label "
-    "for the sentence below rather than answering the sentence itself."
-)
+# CLASSIFICATION_TASK_HINT = (
+#     "Task: This is a classification sample. Respond only with the correct label "
+#     "for the sentence below rather than answering the sentence itself."
+# )
 
+CLASSIFICATION_TASK_HINT = "What are the labels for the above sentence?"
 
-def _prepend_classification_hint(samples: list["EvalData"]) -> bool:
+def _apppend_classification_hint(samples: list["EvalData"]) -> bool:
     """Prepend explicit classification instruction to each question query."""
     modified = False
     for sample in samples:
         for question in sample.questions:
             if CLASSIFICATION_TASK_HINT in question.query:
                 continue
-            question.query = f"{CLASSIFICATION_TASK_HINT}\n\n{question.query}"
+            question.query = f"Sentence: {question.query}\n{CLASSIFICATION_TASK_HINT}"
             modified = True
     return modified
 
@@ -577,7 +578,7 @@ def load_trec_coarse(force_rebuild: bool = False) -> list[EvalData]:
         id_keys=["instance_id"],
         force_rebuild=force_rebuild,
     )
-    if _prepend_classification_hint(data):
+    if _apppend_classification_hint(data):
         with open(cache_path, "w", encoding="utf-8") as cache_file:
             json.dump([item.model_dump() for item in data], cache_file, indent=4, ensure_ascii=False)
     return data
@@ -596,7 +597,7 @@ def load_banking77(force_rebuild: bool = False) -> list[EvalData]:
         id_keys=["instance_id"],
         force_rebuild=force_rebuild,
     )
-    if _prepend_classification_hint(data):
+    if _apppend_classification_hint(data):
         with open(cache_path, "w", encoding="utf-8") as cache_file:
             json.dump([item.model_dump() for item in data], cache_file, indent=4, ensure_ascii=False)
     return data
@@ -615,7 +616,7 @@ def load_clinic(force_rebuild: bool = False) -> list[EvalData]:
         id_keys=["instance_id"],
         force_rebuild=force_rebuild,
     )
-    if _prepend_classification_hint(data):
+    if _apppend_classification_hint(data):
         with open(cache_path, "w", encoding="utf-8") as cache_file:
             json.dump([item.model_dump() for item in data], cache_file, indent=4, ensure_ascii=False)
     return data
@@ -634,7 +635,7 @@ def load_nlu(force_rebuild: bool = False) -> list[EvalData]:
         id_keys=["instance_id"],
         force_rebuild=force_rebuild,
     )
-    if _prepend_classification_hint(data):
+    if _apppend_classification_hint(data):
         with open(cache_path, "w", encoding="utf-8") as cache_file:
             json.dump([item.model_dump() for item in data], cache_file, indent=4, ensure_ascii=False)
     return data
@@ -653,7 +654,7 @@ def load_trec_fine(force_rebuild: bool = False) -> list[EvalData]:
         id_keys=["instance_id"],
         force_rebuild=force_rebuild,
     )
-    if _prepend_classification_hint(data):
+    if _apppend_classification_hint(data):
         with open(cache_path, "w", encoding="utf-8") as cache_file:
             json.dump([item.model_dump() for item in data], cache_file, indent=4, ensure_ascii=False)
     return data
@@ -957,4 +958,9 @@ if __name__ == '__main__':
     # load_synth("s3", force_rebuild=True)
     # load_synth("s50", force_rebuild=True)
     # load_infbench()
-    load_synth("s10", force_rebuild=True)
+    # load_synth("s10", force_rebuild=True)
+    load_trec_coarse(True)
+    load_banking77(True)
+    load_clinic(True)
+    load_nlu(True)
+    load_trec_fine(True)

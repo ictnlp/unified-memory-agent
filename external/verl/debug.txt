@@ -1,0 +1,46 @@
+<|im_start|>system
+# Tools
+
+You may call one or more functions to assist with the user query.
+
+You are provided with function signatures within <tools></tools> XML tags:
+<tools>
+{"type": "native", "function": {"name": "memory_add", "description": "Store new information in memory with a unique title for later retrieval", "parameters": {"type": "object", "properties": {"title": {"type": "string", "description": "Human-friendly title used to reference this memory entry"}, "content": {"type": "string", "description": "Content to store in memory"}}, "required": ["title", "content"]}}}
+{"type": "native", "function": {"name": "memory_update", "description": "Update or rename existing memory entries by title, replacing their content completely", "parameters": {"type": "object", "properties": {"title": {"type": "string", "description": "Existing memory title to update"}, "content": {"type": "string", "description": "New content to persist"}, "new_title": {"type": "string", "description": "Optional new title for the memory entry"}}, "required": ["title", "content"]}}}
+{"type": "native", "function": {"name": "memory_delete", "description": "Permanently delete memory entries by their exact title", "parameters": {"type": "object", "properties": {"title": {"type": "string", "description": "Memory title to delete"}}, "required": ["title"]}}}
+{"type": "native", "function": {"name": "memory_key_retrieve", "description": "Retrieve the full content of a memory entry using its exact title", "parameters": {"type": "object", "properties": {"title": {"type": "string", "description": "Memory title to retrieve"}}, "required": ["title"]}}}
+{"type": "native", "function": {"name": "memory_list", "description": "List all stored memory titles with content previews to see what's available", "parameters": {"type": "object", "properties": {}, "required": []}}}
+{"type": "native", "function": {"name": "memory_bm25_retrieve", "description": "Search memory using keyword matching (BM25). Best for finding documents with specific terms or exact phrases. Returns JSON with ranked results.", "parameters": {"type": "object", "properties": {"query": {"type": "string", "description": "Natural language query used to retrieve relevant memory chunks."}, "top_k": {"type": "integer", "description": "Maximum number of retrieved documents to return. Defaults to 20 if not specified."}}, "required": ["query"]}}}
+{"type": "native", "function": {"name": "memory_embedding_retrieve", "description": "Search memory using semantic similarity (embeddings). Best for finding conceptually related content when exact keywords may vary. Returns JSON with ranked results.", "parameters": {"type": "object", "properties": {"query": {"type": "string", "description": "Natural language query used to retrieve relevant memory documents."}, "top_k": {"type": "integer", "description": "Maximum number of documents to return. Defaults to 20 if not specified."}}, "required": ["query"]}}}
+</tools>
+
+For each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:
+<tool_call>
+{"name": <function-name>, "arguments": <args-json-object>}
+</tool_call><|im_end|>
+<|im_start|>user
+You are presented with a problem and a previous memory.
+
+You have access to tools that can help you solve the problem. Use them if necessary. In particular, if you can't find the answer in the memory, you should use the **memory_list**, **memory_key_retrieve**, **memory_embedding_retrieve** and **memory_bm25_retrieve** tools to find relevant information. If you can not find the answer using one of these tools, you can also use other tools to help you. Try as hard as you can to find the answer using the tools available to you until you find the answer or you are sure that the answer is not in the memory or tools. Do not decide that the answer is not in the memory or tools unless you have used all relevant tools to search for the answer. Before you decided that the information is not available, check that you have used all relevant tools to search for the answer.
+
+Please answer the problem based on the previous memory and the tools. Put your final answer in \\boxed{{}}.
+
+<problem>
+Sentence: would you say that one more time again please.
+What are the labels for the above sentence?
+</problem>
+
+<memory>
+<tool_call>{"name": "memory_list", "arguments": {}}
+</memory>
+
+Your answer:<|im_end|>
+<|im_start|>assistant
+<tool_call>{"name": "memory_bm25_retrieve", "arguments": {"query": "would you say that one more time again please", "top_k": 5}}
+}
+</tool_call><|im_end|><|im_start|>user
+<tool_response>
+{"results": [{"rank": 1, "score": 3.3383027796888958, "text": "[Dialogue between User and Assistant on 2024-01-01 00:00]\n<User>Here are some examples with classification labels to remember:\nSentence: show me my list\nLabel: 29\n\nSentence: i cant hear a thing\nLabel: 31\n\nSentence: play me harry potter from the place i last stopped listening on\nLabel: 54\n\nSentence: turn on the lights that are outdoors\nLabel: 13\n\nSentence: can you please book a train ticket for next saturday to boston\nLabel: 25\n\nSentence: remove any kind of list\nLabel: 19\n\nSentence: what is the biggest city in new hampshire\nLabel: 5\n\nSentence: riddles\nLabel: 66\n\nSentence: replay what you've just said.\nLabel: 11\n\nSentence: please replay that.\nLabel: 11\n\nSentence: remind me two days before my wife birthday\nLabel: 38\n\nSentence: give me some dim light\nLabel: 47\n\nSentence: i do not like these colours in the house\nLabel: 40\n\nSentence: how's it going\nLabel: 66\n\nSentence: given it is four thirty five pm in london what time is it in melbourne\nLabel: 20\n\nSentence: movie times tonight\nLabel: 37\n\nSentence: please make the lights blue\nLabel: 40\n\nSentence: i am sorry but i think you messed up with.\nLabel: 23\n\nSentence: change my light color to blue and please turn off the kitchen light\nLabel: 40\n\nSentence: get me a radio station that plays classical music\nLabel: 27\n\nSentence: how do you roast lamb\nLabel: 65\n\nSentence: order me some chinese food\nLabel: 35\n\nSentence: remove my early alarms\nLabel: 2\n\nSentence: your volume is too high please repeat that lower\nLabel: 63\n\nSentence: it's great one, i appreciate it.\nLabel: 64\n\nSentence: can you find me a train ticket to go to las vegas\nLabel: 44\n\nSentence: play I can't feel my face\nLabel: 17\n\nSentence: olly please will you shut up.\nLabel: 56\n\nSentence: how old is david bowie\nLabel: 5\n\nSentence: this song is too good\nLabel: 59\n\nSentence: what time will it be locally at nine am bangalore india time\nLabel: 20\n\nSentence: what movies are playing tonight\nLabel: 37\n\nSentence: did you get what just said correctly?\nLabel: 12\n\nSentence: repeat the current song\nLabel: 52\n\nSentence: can i find out information about a contact\nLabel: 8\n\nSentence: what is the price of amd on the stock market\nLabel: 4\n\nSentence: create event with alarm for meeting in two hours\nLabel: 42\n\nSentence: will there be a farmers market in the area this weekend\nLabel: 51\n\nSentence: what song is this\nLabel: 48\n\nSentence: again clarify it to me please.\nLabel: 16\n\nSentence: record the program and listen later on\nLabel: 27\n\nSentence: i need to hear what i said again.\nLabel: 11\n\nSentence: what time does the tre train go to fort worth this afternoon\nLabel: 44\n\nSentence: please pause this audio book now\nLabel: 54\n\nSentence: please update me the traffic status\nLabel: 32\n\nSentence: is it raining in toledo right now\nLabel: 9\n\nSentence: can i order out\nLabel: 35\n\nSente...(truncated)
+</tool_response><|im_end|>
+<|im_start|>assistant
+\boxed{11}<|im_end|>
