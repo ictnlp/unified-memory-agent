@@ -1,11 +1,12 @@
 import json
 import numpy as np
 import pandas as pd
+import random
 from datasets import load_dataset
 
 # Load Memalpha dataset
 print("Loading Memalpha dataset...")
-ds = load_dataset("YuWangX/Memalpha", split="train")
+ds = load_dataset("YuWangX/Memalpha-full", split="train")
 print(f"Loaded {len(ds)} samples from Memalpha")
 
 # Filter out lme_train samples
@@ -39,13 +40,18 @@ for sample_idx, sample in enumerate(ds):
     
     print(f"\nProcessing sample {sample_idx}: {original_data_source}, {num_questions} questions, {len(chunks)} chunks")
     
-    # Determine batch size and grouping
+    # Randomly sample up to 10 questions
     if num_questions > 10:
-        # Group into batches of 10
-        batch_size = 10
+        # Randomly sample 10 questions
+        sample_indices = random.sample(range(num_questions), 10)
+        sample_indices.sort()  # Sort to maintain some order
+        sampled_questions = [questions[i] for i in sample_indices]
+        sampled_answers = [answers[i] for i in sample_indices]
+        print(f"  Sampled 10 questions from {num_questions} (indices: {sample_indices})")
     else:
-        # All questions in one batch
-        batch_size = num_questions
+        # Use all questions
+        sampled_questions = questions
+        sampled_answers = answers
     
     # Build context: prepend prompt, then join all chunks
     context_str = sample['prompt'] + '\n\n' + '\n\n'.join(chunks)
@@ -53,78 +59,73 @@ for sample_idx, sample in enumerate(ds):
     # Convert chunks to numpy array
     chunks_array = np.array(chunks, dtype=object)
     
-    # Group questions into batches
-    for i in range(0, num_questions, batch_size):
-        batch_questions = questions[i:i+batch_size]
-        batch_answers = answers[i:i+batch_size]
-        
-        # Build prompt field: single dict with list of questions
-        prompt_item = {
-            'content': batch_questions,
-            'role': 'user'
-        }
-        
-        # Build reward_model field
-        reward_model = {
-            'ground_truth': batch_answers
-        }
-        
-        # Build extra_info field
-        filename = "/mnt/pfs-guan-ssai/nlu/zhangkehao/verl/memagent/store/memory_store.jsonl"
-        
-        extra_info = {
-            'index': total_generated,
-            'num_chunks': len(chunks),
-            'question': batch_questions,  # Store questions for reference
-            'original_sample_id': sample['instance_id'],
-            'tools_kwargs': {
-                'memory_add': {
-                    'create_kwargs': {
-                        'filename': filename
-                    }
-                },
-                'memory_bm25_retrieve': {
-                    'create_kwargs': {
-                        'chunks': chunks_array
-                    }
-                },
-                'memory_delete': {
-                    'create_kwargs': {
-                        'filename': filename
-                    }
-                },
-                'memory_embedding_retrieve': {
-                    'create_kwargs': {
-                        'chunks': chunks_array
-                    }
-                },
-                'memory_key_retrieve': {
-                    'create_kwargs': {
-                        'filename': filename
-                    }
-                },
-                'memory_list': {
-                    'create_kwargs': {
-                        'filename': filename
-                    }
-                },
-                'memory_update': {
-                    'create_kwargs': {
-                        'filename': filename
-                    }
+    # Build prompt field: single dict with list of questions
+    prompt_item = {
+        'content': sampled_questions,
+        'role': 'user'
+    }
+    
+    # Build reward_model field
+    reward_model = {
+        'ground_truth': sampled_answers
+    }
+    
+    # Build extra_info field
+    filename = "./tmp/verl_train/memory_store.jsonl"
+    
+    extra_info = {
+        'index': total_generated,
+        'num_chunks': len(chunks),
+        'question': sampled_questions,  # Store questions for reference
+        'original_sample_id': sample['instance_id'],
+        'tools_kwargs': {
+            'memory_add': {
+                'create_kwargs': {
+                    'filename': filename
+                }
+            },
+            'memory_bm25_retrieve': {
+                'create_kwargs': {
+                    'chunks': chunks_array
+                }
+            },
+            'memory_delete': {
+                'create_kwargs': {
+                    'filename': filename
+                }
+            },
+            'memory_embedding_retrieve': {
+                'create_kwargs': {
+                    'chunks': chunks_array
+                }
+            },
+            'memory_key_retrieve': {
+                'create_kwargs': {
+                    'filename': filename
+                }
+            },
+            'memory_list': {
+                'create_kwargs': {
+                    'filename': filename
+                }
+            },
+            'memory_update': {
+                'create_kwargs': {
+                    'filename': filename
                 }
             }
         }
-        
-        # Append to data
-        data['data_source'].append(f'memalpha_{original_data_source}')
-        data['prompt'].append(np.array([prompt_item], dtype=object))  # Wrap in array
-        data['context'].append(context_str)
-        data['reward_model'].append(reward_model)
-        data['extra_info'].append(extra_info)
-        data['agent_name'].append('tool_mem_agent')
-        
-        total_generated += 1
+    }
+    
+    # Append to data
+    data['data_source'].append(f'memalpha_{original_data_source}')
+    data['prompt'].append(np.array([prompt_item], dtype=object))  # Wrap in array
+    data['context'].append(context_str)
+    data['reward_model'].append(reward_model)
+    data['extra_info'].append(extra_info)
+    data['agent_name'].append('tool_mem_agent')
+    
+    total_generated += 1
 
 print(f"\n{'='*60}")
 print(f"Total training samples generated: {total_generated}")
@@ -132,7 +133,7 @@ print(f"From {len(ds)} original Memalpha samples")
 
 # Save to parquet file
 df = pd.DataFrame(data)
-output_file = "/mnt/pfs-guan-ssai/nlu/zhangkehao/unified-memory-agent/data/memalpha_train_verl.parquet"
+output_file = "/mnt/pfs-guan-ssai/nlu/zhangkehao/unified-memory-agent/data/memalphafull_train_verl.parquet"
 df.to_parquet(output_file, index=False)
 print(f"\nSaved to: {output_file}")
 

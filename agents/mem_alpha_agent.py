@@ -5,23 +5,13 @@ import importlib
 import os
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Optional
+from typing import List, Optional
 
 import yaml
 
 # Import Mem-alpha components (path managed by agents/__init__.py)
-if TYPE_CHECKING:  # pragma: no cover - static typing only
-    from agent import MemoryAgent as RawMemoryAgent  # type: ignore
-    from memory import Memory  # type: ignore
-else:
-    try:
-        RawMemoryAgent = importlib.import_module("agent").MemoryAgent
-        Memory = importlib.import_module("memory").Memory
-    except ImportError as exc:  # pragma: no cover - import guard
-        raise ImportError(
-            "Failed to import Mem-alpha modules. Ensure external/memalpha is available "
-            "and its dependencies are installed."
-        ) from exc
+from agent import MemoryAgent as RawMemoryAgent  # type: ignore
+from memory import Memory  # type: ignore
 
 DEFAULT_AGENT_CONFIG = {
     "agent_name": "memalpha_qwen_agent",

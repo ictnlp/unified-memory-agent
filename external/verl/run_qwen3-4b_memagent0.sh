@@ -7,7 +7,7 @@ ulimit -n 65535
 PROJECT_DIR="$(pwd)"
 CONFIG_PATH="$PROJECT_DIR/examples/sglang_multiturn/config"
 export VERL_LOGGING_LEVEL=DEBUG
-export EMBEDDING_SERVICE_ENDPOINT="http://localhost:8080/embeddings"
+export EMBEDDING_SERVICE_ENDPOINT="http://localhost:8080/v1/embeddings"
 export PROMPT_TEMPLATE_PATH="/mnt/pfs-guan-ssai/nlu/zhangkehao/unified-memory-agent/prompt_template.yaml"
 
 python3 -m verl.trainer.main_ppo \
@@ -18,7 +18,7 @@ python3 -m verl.trainer.main_ppo \
     data.filter_overlong_prompts=True \
     data.truncation='error' \
     data.return_raw_chat=True \
-    actor_rollout_ref.model.path=/mnt/pfs-guan-ssai/nlu/zhangkehao/unified-memory-agent/external/verl/checkpoints/tool_memagent/qwen3-4b_GRPO_extend_datav3/global_step_600/hf \
+    actor_rollout_ref.model.path=Qwen/Qwen3-4B-Instruct-2507 \
     actor_rollout_ref.actor.optim.lr=1e-6 \
     actor_rollout_ref.model.use_remove_padding=True \
     actor_rollout_ref.actor.use_dynamic_bsz=True \
@@ -56,9 +56,9 @@ python3 -m verl.trainer.main_ppo \
     trainer.nnodes=1 \
     trainer.save_freq=20 \
     trainer.test_freq=10 \
-    trainer.val_before_train=True \
+    trainer.val_before_train=False \
     trainer.total_epochs=3 \
-    data.train_files="['/mnt/pfs-guan-ssai/nlu/zhangkehao/unified-memory-agent/data/memalpha_train_verl.parquet', \
+    data.train_files="['/mnt/pfs-guan-ssai/nlu/zhangkehao/unified-memory-agent/data/memalphafull_train_verl.parquet', \
                     '/mnt/pfs-guan-ssai/nlu/zhangkehao/MemAgent_minimal/taskutils/memory_data/hotpotqa_train_mem_agent_loop_chunk2000.parquet', \
                     '/mnt/pfs-guan-ssai/nlu/zhangkehao/unified-memory-agent/data/locomo_train_verl.parquet', \
                     '/mnt/pfs-guan-ssai/nlu/zhangkehao/unified-memory-agent/data/synth_train_verl.parquet']" \

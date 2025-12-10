@@ -158,13 +158,11 @@ class AgentData:
         metrics: dict[str, Any],
         request_id: str,
         memory_kwargs: dict[str, Any],
-        tools_kwargs: dict[str, Any],
     ):
         self.messages = messages
         self.metrics = metrics
         self.request_id = request_id
         self.memory_kwargs = memory_kwargs
-        self.tools_kwargs = tools_kwargs
 
         # Trajectory tracking
         self.conversations: list[TrajectoryConversation] = []
@@ -283,9 +281,6 @@ class ToolMemoryAgentLoop(AgentLoopBase):
 
     @rollout_trace_op
     async def run(self, sampling_params: dict[str, Any], **kwargs) -> List[AgentLoopOutput]:
-        # print("###################DEBUG######################")
-        # print("KWARGS for ToolMemoryAgentLoop run:", kwargs.keys())
-        # print("tools_kwargs:", kwargs.get("tools_kwargs", {}).keys())
         messages = list(kwargs["raw_prompt"])
         data_source = kwargs["data_source"]
         # {'locomo',
@@ -300,7 +295,7 @@ class ToolMemoryAgentLoop(AgentLoopBase):
         metrics = {}
         request_id = uuid4().hex
         memory_kwargs = kwargs.get("memory_kwargs", {})
-        tools_kwargs = kwargs.get("tools_kwargs", {})
+        self.retrieve_chunks = kwargs['tools_kwargs']['memory_bm25_retrieve']['create_kwargs']['chunks']
         # Initialize context chunks from the prompt
         context_text = kwargs.get("context", "")
         if context_text:
@@ -317,7 +312,6 @@ class ToolMemoryAgentLoop(AgentLoopBase):
             metrics=metrics,
             request_id=request_id,
             memory_kwargs=memory_kwargs,
-            tools_kwargs=tools_kwargs,
         )
         trajectory_id = str(uuid4())
         # Process each chunk as a separate conversation with multi-turn tool calling
@@ -465,7 +459,7 @@ class ToolMemoryAgentLoop(AgentLoopBase):
         tasks = []
         for call_type, call_data in all_calls:
             if call_type == 'success':
-                tasks.append(self._call_tool(call_data, agent_data.tools_kwargs, trajectory_id=trajectory_id))
+                tasks.append(self._call_tool(call_data, trajectory_id=trajectory_id))
         
         # Execute all successful tools in parallel
         with simple_timer("tool_calls", agent_data.metrics):
@@ -547,16 +541,19 @@ class ToolMemoryAgentLoop(AgentLoopBase):
         
         agent_data.memory_content = response_text
 
-    async def _call_tool(self, tool_call: FunctionCall, tools_kwargs: dict[str, Any], trajectory_id: str) -> ToolResponse:
+    async def _call_tool(self, tool_call: FunctionCall, trajectory_id: str) -> ToolResponse:
         """Call tool and return tool response."""
         tool, instance_id = None, None
         try:
             tool_name = tool_call.name
             tool_args = json.loads(tool_call.arguments)
             tool = self.tools[tool_name]
-            kwargs = tools_kwargs.get(tool_name, {})
-            create_kwargs = kwargs.get("create_kwargs", {})
-            create_kwargs['trajectory_id'] = trajectory_id
+            create_kwargs = {
+                'trajectory_id': trajectory_id,
+                'filename': './tmp/verl_agent/memory_store.jsonl'
+            }
+            if tool_name == "memory_bm25_retrieve" or tool_name == "memory_embedding_retrieve":
+                create_kwargs['chunks'] = self.retrieve_chunks
             instance_id, _ = await tool.create(create_kwargs=create_kwargs)
             tool_execution_response, tool_reward, res = await tool.execute(instance_id, tool_args)
         except Exception as e:

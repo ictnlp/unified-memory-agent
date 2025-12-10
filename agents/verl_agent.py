@@ -184,7 +184,7 @@ class VerlMemoryAgent(BaseAgent):
             raise RuntimeError("Use QA_batch_async() when the client is asynchronous")
         return asyncio.run(self.QA_batch_async(query_list))
 
-    async def QA_batch_async(self, query_list: List[str]) -> List[str]:
+    async def QA_batch_async(self, query_list: List[str], save_intermediate: bool = False) -> List[str]:
         if not query_list:
             return []
         raw_result, outputs = await self._run_agent_loop(query_list)
@@ -225,7 +225,14 @@ class VerlMemoryAgent(BaseAgent):
                 return extracted.strip()
             return r[-2000:]  # return last 2000 chars as fallback
         results = [try_remove_boxed(r) for r in results]
-        return results, outputs
+        if save_intermediate:
+            intermediate_path = Path(f"./tmp/intermediate_verl_outputs/{uuid4().hex}")
+            intermediate_path.mkdir(parents=True, exist_ok=True)
+            for i, output in enumerate(outputs):
+                filename = intermediate_path / f"output_{i}.txt"
+                with open(filename, "w") as f:
+                    f.write(self._tokenizer.decode(output.prompt_ids))
+        return results
 
     async def _run_agent_loop(self, queries: Sequence[str]) -> List[str]:
         server_manager = ClientCompletionsServerManager(
