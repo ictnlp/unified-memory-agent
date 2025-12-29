@@ -391,8 +391,8 @@ class RetrieveTool(BaseTool):
 
         titles = [mem["title"] for mem in existing_memories]
         if title not in titles:
-            response = f"Title '{title}' does not exist. Use memory_list to see available titles."
-            reward = 0
+            response = f"Title '{title}' does not exist."
+            reward = 1
             metrics = {}
         else:
             matched_index = titles.index(title)
@@ -421,10 +421,15 @@ class ListTool(BaseTool):
             type="native",
             function=OpenAIFunctionSchema(
                 name="memory_list",
-                description="List all stored memory titles with content previews to see what's available",
+                description="List stored memory keys. HIGHLY RECOMMENDED: Use the 'filter' parameter to narrow down results.",
                 parameters=OpenAIFunctionParametersSchema(**{
                     "type": "object",
-                    "properties": {},
+                    "properties": {
+                        "filter": {
+                            "type": "string",
+                            "description": "Optional keyword to filter keys. Only keys containing this string will be returned (e.g., 'Transportation', '2024-04')."
+                        }
+                    },
                     "required": []
                 })
             )
@@ -448,17 +453,13 @@ class ListTool(BaseTool):
         **kwargs
     ) -> Tuple[str, float, Dict[str, Any]]:
         """
-        Execute the memory listing operation.
-        
-        Args:
-            instance_id: Session ID for this memory instance
-            arguments: Tool arguments from the model
-            **kwargs: Additional execution parameters
-            
-        Returns:
-            Tuple of (response, reward, metrics)
+        Execute the memory listing operation with optional filtering.
         """
         filename = self._instance_dict[instance_id]["filename"]
+        
+        # [修改点 2] 获取 filter 参数
+        filter_str = arguments.get("filter", "").strip()
+
         if not os.path.exists(filename):
             os.makedirs(os.path.dirname(filename), exist_ok=True)
             open(filename, "w").close()
@@ -467,10 +468,15 @@ class ListTool(BaseTool):
         normalized_memories = []
         for mem in existing_memories:
             title = mem.get("title") or mem.get("key") or "(untitled)"
+            if filter_str and filter_str not in title:
+                continue
             normalized_memories.append({"title": title, "content": mem.get("content", "")})
 
         if not normalized_memories:
-            response = "No memory entries found."
+            if filter_str:
+                response = f"No memory entries found matching filter '{filter_str}'."
+            else:
+                response = "No memory entries found."
             reward = 1
             metrics = {}
         else:
@@ -481,8 +487,9 @@ class ListTool(BaseTool):
                 preview = content[:77] + "..." if len(content) > 80 else content or "(empty)"
                 response_lines.append(f"- {title}: {preview}")
 
-            response = "Memory Entries:\n" + "\n".join(response_lines)
-            reward = 1  # Small positive reward for successful listing
+            header = f"Memory Entries (Filter: '{filter_str}'):\n" if filter_str else "Memory Entries:\n"
+            response = header + "\n".join(response_lines)
+            reward = 1
             metrics = {}
         return ToolResponse(text=response), reward, metrics
 

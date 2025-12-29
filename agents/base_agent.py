@@ -21,8 +21,8 @@ class BaseAgent:
             api_key="sk-", # 使用一个填充值，实际上我们用headers传递认证信息
             default_headers={
                 "BCS-APIHub-RequestId": str(uuid.uuid4()),  # 将在请求时动态生成
-                "X-CHJ-GWToken": os.getenv("X-CHJ-GWToken"),
-                "X-CHJ-GW-SOURCE": os.getenv("X-CHJ-GW-SOURCE"),
+                "X-CHJ-GWToken": os.getenv("X_CHJ_GWTOKEN"),  # 环境变量名改为X_CHJ_GWTOKEN
+                "X-CHJ-GW-SOURCE": os.getenv("X_CHJ_GW_SOURCE"),  # 也改为X_CHJ_GW_SOURCE
             }
         ),
         model_name: str = "gpt4.1"

@@ -33,8 +33,8 @@ class Memory:
         self.semantic: List[Dict[str, str]] = []
         self.episodic: List[Dict[str, str]] = []
         # Embeddings stored as matrices for batch operations
-        self.semantic_embedding_matrix: np.ndarray = np.empty((0, 1536))  # text-embedding-3-small has 1536 dimensions
-        self.episodic_embedding_matrix: np.ndarray = np.empty((0, 1536))
+        self.semantic_embedding_matrix: np.ndarray = np.empty((0, 384))  # text-embedding-3-small has 1536 dimensions; sentence-transformers/all-MiniLM-L6-v2: 384 dimensions
+        self.episodic_embedding_matrix: np.ndarray = np.empty((0, 384))
         # Memory ID mappings to track which row corresponds to which memory
         self.semantic_embedding_ids: List[str] = []
         self.episodic_embedding_ids: List[str] = []

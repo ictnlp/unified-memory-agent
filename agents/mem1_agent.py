@@ -67,7 +67,7 @@ class ClientWrapper:
         ]
 
         # Apply chat template
-        prompt = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=False)
+        prompt = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
 
         # Remove trailing marker
         if prompt.endswith("<|im_end|>\n"):
@@ -139,6 +139,7 @@ class Mem1Agent(BaseAgent):
             from transformers import AutoTokenizer
             self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         except Exception as e:
+            breakpoint()
             raise RuntimeError(f"Failed to load tokenizer for {model_name}: {e}")
 
         # Wrap the provided client to match VLLMOpenAIClient interface

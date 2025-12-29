@@ -245,7 +245,6 @@ class ToolMemoryAgentLoop(AgentLoopBase):
 
         cls.tokenizer = tokenizer
         cls.processor = processor
-        cls.max_user_turns = config.actor_rollout_ref.rollout.multi_turn.max_user_turns
         cls.max_assistant_turns = config.actor_rollout_ref.rollout.multi_turn.max_assistant_turns
         
         # Memory-specific configuration
@@ -300,8 +299,11 @@ class ToolMemoryAgentLoop(AgentLoopBase):
         context_text = kwargs.get("context", "")
         if context_text:
             # Split context into chunks
-            chunk_size = memory_kwargs.get("chunk_size", self.max_chunk_size)
-            context_chunks = get_chunks(context_text, chunk_size)
+            if kwargs.get('raw_chunks') is not None:
+                context_chunks = kwargs['raw_chunks']
+            else:
+                chunk_size = self.max_chunk_size
+                context_chunks = get_chunks(context_text, chunk_size)
             memory_kwargs["context_chunks"] = context_chunks
         else:
             memory_kwargs["context_chunks"] = []
@@ -360,8 +362,6 @@ class ToolMemoryAgentLoop(AgentLoopBase):
             # Check termination conditions for this conversation
             if len(agent_data.current_response_mask) >= self.response_length:
                 state = AgentState.TERMINATED
-            if self.max_assistant_turns and agent_data.assistant_turns >= self.max_assistant_turns:
-                state = AgentState.TERMINATED
 
         await self._update_memory_content(agent_data, verbose, trajectory_id)
         agent_data.add_conversation(is_final=0)
@@ -371,31 +371,45 @@ class ToolMemoryAgentLoop(AgentLoopBase):
         """Generate final response with tool support."""
         # Prepare final prompt
         final_prompts = await self._build_final_prompt_ids(agent_data.messages, agent_data.memory_content, data_source)
-        for idx, final_prompt in enumerate(final_prompts):
-            agent_data.current_prompt_ids = final_prompt
-            if len(agent_data.current_prompt_ids) > self.prompt_length + self.response_length:
-                print(f"WARNING: Final prompt length {len(agent_data.current_prompt_ids)} exceeds max prompt length {self.prompt_length + self.response_length}")
-            # Multi-turn generation loop for final response
-            state = AgentState.GENERATING
-            while state != AgentState.TERMINATED:
-                if state == AgentState.GENERATING:
-                    state = await self._handle_generating_state(agent_data, sampling_params)
-                elif state == AgentState.PROCESSING_TOOLS:
-                    state = await self._handle_processing_tools_state(agent_data, trajectory_id)
-                
-                # Check termination conditions
-                if len(agent_data.current_response_mask) >= self.response_length:
-                    state = AgentState.TERMINATED
-                if self.max_assistant_turns and agent_data.assistant_turns >= self.max_assistant_turns:
-                    state = AgentState.TERMINATED
-            
-            if verbose:
-                response_text = await asyncio.to_thread(
-                    self.tokenizer.decode, agent_data.current_response_ids, skip_special_tokens=True
+        sem = asyncio.Semaphore(10)
+        async def process_one_final_prompt(idx, final_prompt):
+            async with sem:
+                local_agent_data = AgentData(
+                    messages=agent_data.messages,
+                    metrics=agent_data.metrics,
+                    request_id=f"{agent_data.request_id}_final_{idx}",
+                    memory_kwargs=agent_data.memory_kwargs,
                 )
-                print(f"Final Answer:\n{response_text}")
-            
-            agent_data.add_conversation(is_final=idx+1)
+                local_agent_data.memory_content = agent_data.memory_content
+                local_agent_data.current_prompt_ids = final_prompt
+                if len(local_agent_data.current_prompt_ids) > self.prompt_length + self.response_length:
+                    print(f"WARNING: Final prompt length {len(local_agent_data.current_prompt_ids)} exceeds max prompt length {self.prompt_length + self.response_length}")
+                # Multi-turn generation loop for final response
+                state = AgentState.GENERATING
+                while state != AgentState.TERMINATED:
+                    if state == AgentState.GENERATING:
+                        state = await self._handle_generating_state(local_agent_data, sampling_params)
+                    elif state == AgentState.PROCESSING_TOOLS:
+                        state = await self._handle_processing_tools_state(local_agent_data, trajectory_id)
+                    
+                    # Check termination conditions
+                    if len(local_agent_data.current_response_mask) >= self.response_length:
+                        state = AgentState.TERMINATED
+                
+                if verbose:
+                    response_text = await asyncio.to_thread(
+                        self.tokenizer.decode, local_agent_data.current_response_ids, skip_special_tokens=False
+                    )
+                    print(f"Final Answer:\n{response_text}")
+                
+                local_agent_data.add_conversation(is_final=idx+1)
+                return local_agent_data.conversations
+        tasks = []
+        for idx, final_prompt in enumerate(final_prompts):
+            tasks.append(process_one_final_prompt(idx, final_prompt))
+        results_lists = await asyncio.gather(*tasks)
+        for result_conversations in results_lists:
+            agent_data.conversations.extend(result_conversations)
 
     async def _handle_generating_state(self, agent_data: AgentData, sampling_params: dict[str, Any]) -> AgentState:
         """Handle the generating state: generate model response and check for tool calls."""
@@ -410,10 +424,34 @@ class ToolMemoryAgentLoop(AgentLoopBase):
                 prompt_ids=agent_data.current_prompt_ids,
                 sampling_params=sampling_params,
             )
-        agent_data.assistant_turns += 1
         response_ids = output.token_ids
-        # if "<tool_call>" in self.tokenizer.decode(response_ids, skip_special_tokens=True):
-        #     breakpoint()
+        # Extract tool calls if tool parser is available
+        agent_data.tool_calls = []
+        agent_data.failed_tool_calls = []
+        tool_start_id = self.tokenizer.convert_tokens_to_ids("<tool_call>")
+        tool_end_id = self.tokenizer.convert_tokens_to_ids("</tool_call>")
+        if self.tool_parser:
+            _, agent_data.tool_calls, num_tools, agent_data.failed_tool_calls = await self.tool_parser.extract_tool_calls(response_ids, return_failed_and_num_tools=True)
+            agent_data.current_num_tools += response_ids.count(tool_start_id)
+        if num_tools:
+            def remove_last_tool_call():
+                """Remove the last tool call from response_ids."""
+                # Find the last occurrence of <tool_call> and </tool_call>
+                end_idx = len(response_ids) - 1 - response_ids[::-1].index(tool_end_id)
+                start_idx = len(response_ids[:end_idx]) - 1 - response_ids[:end_idx][::-1].index(tool_start_id)
+                if start_idx != -1 and end_idx != -1 and start_idx < end_idx:
+                    del response_ids[start_idx:end_idx + 1]
+            while len(agent_data.current_response_ids) + len(response_ids) > self.response_length - 500 and num_tools > 0:
+                remove_last_tool_call()
+                num_tools -= 1
+                if agent_data.failed_tool_calls and agent_data.failed_tool_calls[-1][0] == num_tools:
+                    agent_data.failed_tool_calls.pop()
+                else:
+                    agent_data.tool_calls.pop()
+            if len(agent_data.current_response_ids) + len(response_ids) > self.response_length - 500:
+                # If still exceeding, truncate from the middle
+                response_ids = response_ids[:self.response_length - len(agent_data.current_response_ids) - 500 -1] + response_ids[-1:]
+        agent_data.assistant_turns += 1
         agent_data.current_prompt_ids += response_ids
         agent_data.current_response_ids += response_ids
         agent_data.current_response_mask += [1] * len(response_ids)
@@ -421,13 +459,6 @@ class ToolMemoryAgentLoop(AgentLoopBase):
             agent_data.current_response_logprobs += output.log_probs
         else:
             agent_data.current_response_logprobs += [0.0] * len(response_ids)
-
-        # Extract tool calls if tool parser is available
-        agent_data.tool_calls = []
-        agent_data.failed_tool_calls = []
-        if self.tool_parser:
-            _, agent_data.tool_calls, num_tools, agent_data.failed_tool_calls = await self.tool_parser.extract_tool_calls(response_ids, return_failed_and_num_tools=True)
-            agent_data.current_num_tools += num_tools
         
         # Determine next state
         if agent_data.tool_calls or agent_data.failed_tool_calls:
@@ -494,15 +525,41 @@ class ToolMemoryAgentLoop(AgentLoopBase):
         response_ids = response_ids[len(self.system_prompt):]
         
         # Check if we would exceed response length
-        if len(agent_data.current_response_ids) + len(response_ids) >= self.response_length:
-            return AgentState.TERMINATED
-        if len(agent_data.current_response_ids) + len(response_ids) >= self.response_length - 500:
-            add_prompt = "No more tools can be called due to response length limit."
-            add_prompt_ids = await asyncio.to_thread(
+        # if len(agent_data.current_response_ids) + len(response_ids) > self.response_length - 200:
+        #     prefix_response_ids = response_ids[:-5]
+        #     suffix_response_ids = response_ids[-5:]  # generation_prompt是最后5个token，需要保留
+        #     # 从agent视角提示：由于token限制，接下来需要给出最终结果
+        #     # 适用于QA任务（给出答案）和记忆存储任务（给出总结）
+        #     agent_instruction = " Due to the token limit, I will now conclude."
+        #     middle_prompt_ids = await asyncio.to_thread(
+        #         self.tokenizer.encode, agent_instruction, add_special_tokens=False
+        #     )
+        #     response_ids = prefix_response_ids + middle_prompt_ids + suffix_response_ids
+        if len(agent_data.current_response_ids) + len(response_ids) > self.response_length - 200:
+            prefix_response_ids = response_ids[: self.response_length - len(agent_data.current_response_ids) - 200 + 5]
+            middle_prompt_ids = await asyncio.to_thread(
+                self.tokenizer.encode, 
+                "...(tool response truncated)...\nNo more tools can be called due to response length limit. Please give the final response without calling any more tools. ", 
+                add_special_tokens=False
+            )
+            suffix_response_ids = response_ids[-5:] # generation_prompt是最后5个token，需要保留
+            append_prompt_ids = await asyncio.to_thread(
+                self.tokenizer.encode, 
+                "Due to the token limit, I need to provide my final response now without calling any more tools. ", 
+                add_special_tokens=False
+            )
+            response_ids = prefix_response_ids + middle_prompt_ids + suffix_response_ids + append_prompt_ids
+        if self.max_assistant_turns and agent_data.assistant_turns >= self.max_assistant_turns:
+            add_prompt = "\nNo more tools can be called due to assistant turn limit. Please give the final response without calling any more tools."
+            middle_prompt_ids = await asyncio.to_thread(
                 self.tokenizer.encode, add_prompt, add_special_tokens=False
             )
-            if len(agent_data.current_response_ids) + len(response_ids) + len(add_prompt_ids) < self.response_length:
-                response_ids += add_prompt_ids
+            append_prompt_ids = await asyncio.to_thread(
+                self.tokenizer.encode, 
+                "I have reached the maximum number of assistant turns, so I will provide my final response now without calling any more tools.", 
+                add_special_tokens=False
+            )
+            response_ids = response_ids[:-5] + middle_prompt_ids + response_ids[-5:] + append_prompt_ids  # generation_prompt是最后5个token，需要保留
         # Update prompt_ids and response_mask
         agent_data.current_prompt_ids += response_ids
         agent_data.current_response_ids += response_ids
@@ -519,13 +576,13 @@ class ToolMemoryAgentLoop(AgentLoopBase):
         """Update memory content from the generated response."""
         # Decode the response to get updated memory
         response_text = await asyncio.to_thread(
-            self.tokenizer.decode, agent_data.current_response_ids, skip_special_tokens=True
+            self.tokenizer.decode, agent_data.current_response_ids, skip_special_tokens=False
         )
         # Extract memory content (remove thinking tags if present)
-        for sep in ['</tool_response>\nassistant', '</think>']:
+        for sep in ['<|im_start|>assistant', '</think>']:
             if sep in response_text:
                 response_text = response_text.split(sep)[-1].strip()
-
+        response_text = response_text.replace("<|im_end|>", "").strip()
         if verbose:
             print(f"Updated memory:\n{response_text}")
             print(f"TRAJECTORY_ID: {trajectory_id}")
@@ -586,10 +643,10 @@ class ToolMemoryAgentLoop(AgentLoopBase):
         memory_token_template = TokenTemplate(FULL_MEMORY_PROMPT_TEMPLATE, self.tokenizer)
         memory_ids = self.tokenizer.encode(memory, add_special_tokens=False)
         chunk_ids = self.tokenizer.encode(chunk, add_special_tokens=False)
-        if len(memory_token_template) + len(memory_ids) + len(chunk_ids) > self.prompt_length:
-            print(f"WARNING: Memory prompt length {len(memory_token_template)} + {len(memory_ids)} + {len(chunk_ids)} exceeds max prompt length {self.prompt_length}, truncating memory.")
-            memory_ids = memory_ids[-(self.prompt_length - 200 - len(memory_token_template) - len(chunk_ids)):]
-            # 留200个token给response
+        # if len(memory_token_template) + len(memory_ids) + len(chunk_ids) > self.prompt_length:
+        #     print(f"WARNING: Memory prompt length {len(memory_token_template)} + {len(memory_ids)} + {len(chunk_ids)} exceeds max prompt length {self.prompt_length}, truncating memory.")
+        #     memory_ids = memory_ids[-(self.prompt_length - len(memory_token_template) - len(chunk_ids)):]
+        memory_ids = memory_ids[-1000:]
         memory_prompt = memory_token_template.format(
             memory=memory_ids,
             chunk=chunk_ids,
@@ -616,10 +673,10 @@ class ToolMemoryAgentLoop(AgentLoopBase):
             prompt_text = [prompt_text]
         for p in prompt_text:
             prompt_ids = self.tokenizer.encode(p, add_special_tokens=False)
-            if len(final_token_template) + len(prompt_ids) + len(memory_ids) > self.prompt_length:
-                print(f"WARNING: Final prompt length {len(final_token_template)} + {len(memory_ids)} + {len(prompt_ids)} exceeds max prompt length {self.prompt_length}, truncating memory.")
-                memory_ids = memory_ids[-(self.prompt_length - 200 - len(final_token_template) - len(prompt_ids)):]
-                # 留200个token给response
+            # if len(final_token_template) + len(prompt_ids) + len(memory_ids) > self.prompt_length:
+            #     print(f"WARNING: Final prompt length {len(final_token_template)} + {len(memory_ids)} + {len(prompt_ids)} exceeds max prompt length {self.prompt_length}, truncating memory.")
+            #     memory_ids = memory_ids[-(self.prompt_length - len(final_token_template) - len(prompt_ids)):]
+            memory_ids = memory_ids[-1000:]  # Limit memory size in final prompt to 1000 tokens
             final_prompt = final_token_template.format(
                 prompttext=prompt_ids,
                 memory=memory_ids,

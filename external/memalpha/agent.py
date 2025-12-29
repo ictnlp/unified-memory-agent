@@ -123,7 +123,7 @@ class MemoryAgent:
             qwen_model = model_name or self.DEFAULT_QWEN_MODEL
 
             # Check if we're in offline mode
-            tokenizer_kwargs = {}
+            tokenizer_kwargs = {"fix_mistral_regex": True}
             if os.environ.get("HF_HUB_OFFLINE") == "1" or os.environ.get("TRANSFORMERS_OFFLINE") == "1":
                 tokenizer_kwargs["local_files_only"] = True
 

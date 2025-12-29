@@ -323,8 +323,8 @@ class FileMemoryAgent(BaseAgent):
                 client_kwargs={
                     "default_headers": {
                         "BCS-APIHub-RequestId": str(uuid.uuid4()),
-                        "X-CHJ-GWToken": os.getenv("X-CHJ-GWToken"),
-                        "X-CHJ-GW-SOURCE": os.getenv("X-CHJ-GW-SOURCE"),
+                        "X-CHJ-GWToken": os.getenv("X_CHJ_GWTOKEN"),  # 环境变量名改为X_CHJ_GWTOKEN
+                        "X-CHJ-GW-SOURCE": os.getenv("X_CHJ_GW_SOURCE"),  # 也改为X_CHJ_GW_SOURCE
                     }
                 }
             )

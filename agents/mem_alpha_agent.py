@@ -122,8 +122,6 @@ class MemAlphaUnifiedAgent:
     # ------------------------------------------------------------------
     # Question answering
     # ------------------------------------------------------------------
-    def QA(self, query: str) -> str:
-        return self.QA_batch([query])[0]
 
     async def QA_batch_async(self, query_list: List[str]) -> List[str]:
         responses: List[str] = []

@@ -33,10 +33,21 @@ CONSUMPTION_SCENES = {
     "Other": ["Transfer", "Red Envelope", "Donation", "Pet", "Beauty & Salon"]
 }
 
-DEFAULT_MODEL = "Qwen/Qwen3-30B-A3B-Instruct-2507"
+# DEFAULT_MODEL = "Qwen/Qwen3-30B-A3B-Instruct-2507"
+# API_CONFIG = {
+#     "base_url": "http://127.0.0.1:8000/v1",
+#     "api_key": "EMPTY",
+#     "max_retries": 100
+# }
+
+DEFAULT_MODEL = "gemini-3-pro-preview"
 API_CONFIG = {
-    "base_url": "http://127.0.0.1:8000/v1",
-    "api_key": "EMPTY",
+    "base_url": "http://api-hub.inner.chj.cloud/llm-gateway/v1",
+    "api_key": "sk-EMPTY",
+    "default_headers": {
+        "BCS-APIHub-RequestId": str(uuid.uuid4()),
+        "X-CHJ-GWToken": 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiI5OHFnRkVlcEFVeEM4Qk91UUZJVDNXQUwwTG9OV0NQaSJ9.vTX_oU2rXrrgkPK5_RU76b2gRLpwlCxZ346mvCdug7A',
+    },
     "max_retries": 100
 }
 
@@ -75,6 +86,7 @@ async def call_llm(client, model: str, messages: List[Dict[str, str]], temperatu
             model=model,
             messages=messages,
             temperature=temperature,
+            max_tokens=8192,
         )
         return resp.choices[0].message.content
 
@@ -151,13 +163,14 @@ Context:
 
 Please return in JSON format with two fields:
 1. "dialogue": List of conversations, each item contains {{"role": "user"/"assistant", "content": "dialogue content"}}
-2. "transactions": List of transaction records, each item contains {{"scene": "scene", "subscene": "subscene", "amount": amount(number), "description": "brief description"}}
+2. "transactions": List of transaction records, each item contains {{"scene": "scene", "subscene": "subscene", "amount": amount(number), "description": "brief description", "date": "YYYY-MM-DD"}}
 
 Notes:
 - The dialogue should be natural, not too mechanical
 - Amount must be a number (e.g., 45.5), without currency symbols
 - Each item in transactions must be reflected in the dialogue
 - For non-first sessions, avoid greetings like "Hi there!" or "Can you help me track expenses?"
+- IMPORTANT: When mentioning expenses in the dialogue, always explicitly state the scene category (e.g., "Dining", "Transportation", "Shopping") rather than just the subscene (e.g., don't just say "Coffee", say "Dining - Coffee" or "spent on dining for coffee")
 
 Please return JSON only, no other content."""
 
@@ -169,12 +182,11 @@ Please return JSON only, no other content."""
         try:
             response = await call_llm(client, model, messages, temperature=0.8)
             parsed = parse_json_response(response)
-            
             # Build Transaction objects
             transactions = []
             for tx in parsed.get("transactions", []):
                 transactions.append(Transaction(
-                    date=date,
+                    date=tx["date"],
                     scene=tx["scene"],
                     subscene=tx["subscene"],
                     amount=float(tx["amount"]),
@@ -199,36 +211,46 @@ Please return JSON only, no other content."""
 
 
 async def generate_questions(client, model: str, transactions: List[Transaction], dates: List[str],
-                             num_questions: int = 100, diversify: bool = True, position: int = None) -> List[Dict[str, Any]]:
-    """Generate questions asynchronously."""
-    
+                             diversify: bool = True, position: int = None) -> List[Dict[str, Any]]:
+    """
+    Generate questions asynchronously.
+    Fixed generation: Type 1-7 each generates 5 questions, Type 8 generates 1 question.
+    Total: up to 36 questions per call (may be less if data doesn't meet requirements).
+
+    Requirements for full 36 questions:
+    - len(dates) >= 2 (for Type 1-6)
+    - scene_stats exists (for Type 4)
+    - transactions exist (for Type 6)
+    - date_count exists for at least one scene (for Type 5)
+
+    Returns actual number of questions generated (may be < 36).
+    """
+
     questions = []
     task_id = uuid.uuid4().hex[:8]
-    
+
     # Statistics by scene
     scene_stats = defaultdict(float)
     subscene_stats = defaultdict(float)
     date_stats = defaultdict(float)
     date_scene_stats = defaultdict(lambda: defaultdict(float))
-    
+
     for tx in transactions:
         scene_stats[tx.scene] += tx.amount
         subscene_stats[f"{tx.scene}-{tx.subscene}"] += tx.amount
         date_stats[tx.date] += tx.amount
         date_scene_stats[tx.date][tx.scene] += tx.amount
-    
+
     total_amount = sum(tx.amount for tx in transactions)
-    
+
     # Question templates
     question_specs = []
-    
-    # Calculate questions per type (7 types now, Type 8 only appears once)
-    remaining_questions = num_questions - 1  # Reserve 1 for Type 8
-    q_per_type = remaining_questions // 7
-    remainder = remaining_questions % 7
-    
+
+    # Fixed: each of Type 1-7 generates 5 questions, Type 8 generates 1 question
+    q_per_type = 5
+
     # Type 1: Total spending in a specific scene within a time range
-    for _ in range(q_per_type + (1 if remainder > 0 else 0)):
+    for _ in range(q_per_type):
         if len(dates) >= 2:
             start_idx = random.randint(0, len(dates) - 2)
             end_idx = random.randint(start_idx + 1, len(dates) - 1)
@@ -248,14 +270,14 @@ async def generate_questions(client, model: str, transactions: List[Transaction]
             })
     
     # Type 2: Total spending in multiple scenes within a time range
-    for _ in range(q_per_type + (1 if remainder > 1 else 0)):
+    for _ in range(q_per_type):
         if len(dates) >= 2:
             start_idx = random.randint(0, len(dates) - 2)
             end_idx = random.randint(start_idx + 1, len(dates) - 1)
             start_date = dates[start_idx]
             end_date = dates[end_idx]
             
-            num_scenes = random.randint(2, min(3, len(CONSUMPTION_SCENES)))
+            num_scenes = random.randint(2, 3)
             scenes = random.sample(list(CONSUMPTION_SCENES.keys()), num_scenes)
             
             amount = sum(tx.amount for tx in transactions 
@@ -269,7 +291,7 @@ async def generate_questions(client, model: str, transactions: List[Transaction]
             })
     
     # Type 3: Total spending within a time range
-    for _ in range(q_per_type + (1 if remainder > 2 else 0)):
+    for _ in range(q_per_type):
         if len(dates) >= 2:
             start_idx = random.randint(0, len(dates) - 2)
             end_idx = random.randint(start_idx + 1, len(dates) - 1)
@@ -286,45 +308,60 @@ async def generate_questions(client, model: str, transactions: List[Transaction]
             })
     
     # Type 4: Which scene had the most spending
-    for _ in range(q_per_type + (1 if remainder > 3 else 0)):
+    for _ in range(q_per_type):
         if len(dates) >= 2 and scene_stats:
             start_idx = random.randint(0, len(dates) - 2)
             end_idx = random.randint(start_idx + 1, len(dates) - 1)
             start_date = dates[start_idx]
             end_date = dates[end_idx]
-            
+
             range_scene_stats = defaultdict(float)
             for tx in transactions:
                 if start_date <= tx.date <= end_date:
                     range_scene_stats[tx.scene] += tx.amount
-            
+
             if range_scene_stats:
-                max_scene = max(range_scene_stats.items(), key=lambda x: x[1])
+                # 找出所有最大值的场景（可能有多个）
+                max_amount = max(range_scene_stats.values())
+                max_scenes = [scene for scene, amount in range_scene_stats.items() if amount == max_amount]
+
+                # 答案是所有最大值场景，按字母排序以保证一致性
+                answer = ", ".join(sorted(max_scenes)) if len(max_scenes) > 1 else max_scenes[0]
+
+                # 列出所有可能的scene类别以明确问题
+                all_scenes = ", ".join(list(CONSUMPTION_SCENES.keys()))
+
                 question_specs.append({
-                    "template": f"Which consumption scene had the highest spending from {start_date} to {end_date}?",
-                    "answer": max_scene[0],
+                    "template": f"Which main consumption scene category (such as {all_scenes}) had the highest spending from {start_date} to {end_date}? Please answer with the main category name only, not the subcategory. If there are multiple answers, output all of them separated by commas.",
+                    "answer": answer,
                     "category": "max_scene"
                 })
-    
+
     # Type 5: Date with the most transactions in a specific scene
-    for _ in range(q_per_type + (1 if remainder > 4 else 0)):
+    for _ in range(q_per_type):
         scene = random.choice(list(CONSUMPTION_SCENES.keys()))
         date_count = defaultdict(int)
-        
+
         for tx in transactions:
             if tx.scene == scene:
                 date_count[tx.date] += 1
-        
+
         if date_count:
-            max_date = max(date_count.items(), key=lambda x: x[1])
+            # 找出所有交易次数最多的日期（可能有多个）
+            max_count = max(date_count.values())
+            max_dates = [date for date, count in date_count.items() if count == max_count]
+
+            # 答案是所有最大值日期，按时间排序
+            answer = ", ".join(sorted(max_dates)) if len(max_dates) > 1 else max_dates[0]
+
             question_specs.append({
-                "template": f"On which date were there the most {scene} transactions?",
-                "answer": max_date[0],
+                "template": f"On which date were there the most {scene} transactions? If there are multiple answers, output all of them separated by commas.",
+                "answer": answer,
                 "category": "max_frequency_date"
             })
     
     # Type 6: Largest single transaction
-    for _ in range(q_per_type + (1 if remainder > 5 else 0)):
+    for _ in range(q_per_type):
         if len(dates) >= 2 and transactions:
             start_idx = random.randint(0, len(dates) - 2)
             end_idx = random.randint(start_idx + 1, len(dates) - 1)
@@ -342,7 +379,7 @@ async def generate_questions(client, model: str, transactions: List[Transaction]
                 })
     
     # Type 7: Spending on a specific scene on a specific date
-    for _ in range(q_per_type + (1 if remainder > 6 else 0)):
+    for _ in range(q_per_type):
         date = random.choice(dates)
         scene = random.choice(list(CONSUMPTION_SCENES.keys()))
         
@@ -477,6 +514,8 @@ async def async_main(
         raise ValueError("num_records must be >= 1")
     if llm_concurrency < 1:
         raise ValueError("llm_concurrency must be >= 1")
+    if num_sessions < 2:
+        raise ValueError("num_sessions must be >= 2 (required for question generation)")
 
     client = client or get_client()
 
@@ -547,18 +586,21 @@ async def async_main(
                 chunk_lines.append(line)
             chunks.append("\n".join(chunk_lines))
 
+        # 从transactions中提取实际有交易的日期集合
+        actual_dates = sorted(list(set(tx.date for tx in all_transactions)))
+        print(f"{prefix}Actual dates with transactions: {len(actual_dates)} out of {len(dates)}")
+
         print(f"{prefix}Generating questions...")
         task_id = "consumption_tracking_" + uuid.uuid4().hex[:8]
         questions = await generate_questions(
             client,
             model,
             all_transactions,
-            dates,
-            num_questions=num_questions,
+            actual_dates,  # 使用实际有交易的日期而非原始dates
             diversify=not no_diversify,
             position=len(chunks) - 1,
         )
-        print(f"{prefix}Generated {len(questions)} questions")
+        print(f"{prefix}Generated {len(questions)} questions (target: 36 per sample)")
 
         transaction_events = []
         for tx in all_transactions:
@@ -597,14 +639,38 @@ async def async_main(
 
         return output
 
-    outputs = await asyncio.gather(*(build_dataset(idx) for idx in range(num_records)))
+    # Generate samples until we have enough questions
+    outputs = []
+    total_questions = 0
+    sample_idx = 0
+
+    while total_questions < num_questions:
+        print(f"\n--- Generating sample {sample_idx + 1} (current total: {total_questions}/{num_questions} questions) ---")
+        output = await build_dataset(sample_idx)
+        outputs.append(output)
+
+        # Count questions in this sample
+        num_q = len(output["questions"])
+        total_questions += num_q
+        sample_idx += 1
+
+        print(f"Sample {sample_idx} generated {num_q} questions. Total: {total_questions}/{num_questions}")
+
+        # Safety limit to prevent infinite loop
+        if sample_idx >= 70:
+            print(f"⚠️ Warning: Reached maximum 70 samples. Stopping generation.")
+            break
+
+    print(f"\n✅ Generated {sample_idx} samples with {total_questions} total questions (target: {num_questions})")
 
     if out:
         with open(out, "w", encoding="utf-8") as f:
             json.dump(outputs, f, indent=4, ensure_ascii=False)
-        print(f"\n✅ Dataset written to: {out}")
+        print(f"✅ Dataset written to: {out}")
     else:
-        print("\n⚠️ Output path not provided. Dataset was generated but not saved.")
+        print("⚠️ Output path not provided. Dataset was generated but not saved.")
+
+    return outputs
 
 def main(
     model: str = DEFAULT_MODEL,
@@ -617,11 +683,19 @@ def main(
     min_scenes: int = 1,
     max_scenes: int = 10,
     fast: bool = False,
-    num_records: int = 1,
     llm_concurrency: int = 8,
     client=None,
 ):
-    """Fire entry point that runs the async pipeline."""
+    """
+    Fire entry point that runs the async pipeline.
+
+    num_questions: Target number of questions to generate.
+                   Will keep generating samples until reaching this target.
+                   Each sample generates up to 36 questions (Type 1-7: 5 each, Type 8: 1).
+    """
+    print(f"Target: {num_questions} questions")
+    print(f"Will generate samples until target is reached (up to 36 questions per sample)")
+
     return asyncio.run(
         async_main(
             model=model,
@@ -634,7 +708,7 @@ def main(
             min_scenes=min_scenes,
             max_scenes=max_scenes,
             fast=fast,
-            num_records=num_records,
+            num_records=1,  # Not used anymore, but keep for compatibility
             llm_concurrency=llm_concurrency,
             client=client,
         )

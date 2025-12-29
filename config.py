@@ -28,13 +28,12 @@ import os
 import httpx
 
 # Configuration
-API_CONFIG = {
+API_CONFIG_REMOTE = {
     "base_url": "http://api-hub.inner.chj.cloud/llm-gateway/v1",
     "api_key": "sk-",
     "default_headers": {
         "BCS-APIHub-RequestId": str(uuid.uuid4()),
-        "X-CHJ-GWToken": os.getenv("X-CHJ-GWToken"),
-        "X-CHJ-GW-SOURCE": os.getenv("X-CHJ-GW-SOURCE"),
+        "X-CHJ-GWToken": os.getenv("X_CHJ_GWTOKEN"),  # 环境变量名改为X_CHJ_GWTOKEN
     },
     "max_retries": 100
 }
@@ -131,7 +130,11 @@ class AgentRegistry:
         if spec is None:
             raise KeyError(key)
         module_name, class_name = spec
-        module = importlib.import_module(module_name)
+        try:
+            module = importlib.import_module(module_name)
+        except ImportError as e:
+            breakpoint()
+            raise e
         agent_cls = getattr(module, class_name)
         self._cache[key] = agent_cls
         return agent_cls

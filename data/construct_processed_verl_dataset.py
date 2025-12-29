@@ -112,7 +112,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--memory-store",
         type=Path,
-        default=Path("/mnt/pfs-guan-ssai/nlu/zhangkehao/verl/memagent/store/memory_store.jsonl"),
+        default=Path("./tmp/verl_agent/memory_store.jsonl"),
         help="Memory store file used by memory tools",
     )
     parser.add_argument("--dataset-name", default="generic", help="Dataset identifier written to data_source column")

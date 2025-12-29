@@ -92,6 +92,24 @@ class ClientCompletionsServerManager:
             }
         ]
 
+def get_chunks(context_text, chunk_size):
+    separator = "\n"
+    small_chunks = context_text.split(separator)
+    chunks = []
+    to_append = ""
+    for chunk in small_chunks:
+        if len(to_append) + len(chunk) + len(separator) <= chunk_size:
+            if to_append:
+                to_append += separator + chunk
+            else:
+                to_append = chunk
+        else:
+            if to_append:
+                chunks.append(to_append)
+            to_append = chunk
+    if to_append:
+        chunks.append(to_append)
+    return chunks
 
 class VerlMemoryAgent(BaseAgent):
     """Agent that wraps Verl's ToolMemoryAgentLoop for unified-memory-agent."""
@@ -101,49 +119,105 @@ class VerlMemoryAgent(BaseAgent):
         *,
         client: Any = None,
         model_name: str = "gpt4.1",
-        agent_config: Optional[dict[str, Any]] = None,
         data_source: str | None = None,
+        agent_id: Optional[str] = None,
     ) -> None:
         if client is None:
             super().__init__(model_name=model_name)
         else:
             super().__init__(client=client, model_name=model_name)
-        self._agent_config = agent_config or {}
         self._is_async = hasattr(self.client, "__class__") and "Async" in self.client.__class__.__name__
         self._resolved_model = MODEL_NAME_MAP.get(self.model_name, self.model_name)
         self._tokenizer = AutoTokenizer.from_pretrained(self._resolved_model, fix_mistral_regex=True)
-        self._config = self._build_config(self._agent_config)
+        self._config = self._build_config()
         ToolMemoryAgentLoop.init_class(self._config, self._tokenizer, None)
-        self._memory_dir = Path(self._agent_config.get("memory_dir", PROJECT_ROOT / "tmp" / "verl_agent"))
+        self._memory_dir = Path(PROJECT_ROOT / "tmp" / "verl_agent")
         self._memory_dir.mkdir(parents=True, exist_ok=True)
-        self._max_response_tokens = int(self._agent_config.get("response_length", self._config.actor_rollout_ref.rollout.response_length))
-        self._max_chunk_size = int(
-            self._agent_config.get(
-                "max_chunk_size",
-                self._config.actor_rollout_ref.rollout.multi_turn.get("max_chunk_size", 15000),
-            )
-        )
+        self._max_response_tokens = int(self._config.actor_rollout_ref.rollout.response_length)
         self._context_chunks: List[str] = []
-        self._context: str = ""
         self.data_source = data_source
+        self.agent_id = agent_id
+        self.raw_chunks: List[str] = []
 
-    def _build_config(self, overrides: dict[str, Any]):
+    def _parse_longmemeval_chunk(self, content: str) -> List[str]:
+        """解析LongMemEval格式的chunk为individual turns（严格按照原始实现）"""
+        turns = []
+        lines = content.split('\n')
+
+        # 找到日期和对话部分
+        date_line = None
+        conversation_started = False
+        current_role = None
+        current_content = ""
+
+        for line in lines:
+            line = line.strip()
+            if line.startswith('DATE:'):
+                # 提取日期
+                date_part = line.split('DATE:')[1].strip()
+                # 简化日期格式，提取主要部分
+                if '(' in date_part:
+                    date_line = date_part.split('(')[0].strip()
+                else:
+                    date_line = date_part
+            elif line == 'CONVERSATION:':
+                conversation_started = True
+            elif conversation_started and line:
+                # 解析对话turn - 检查是否是新的角色开始
+                if line.startswith('User said,') or line.startswith('Assistant said,'):
+                    # 如果之前有内容，先保存之前的turn
+                    if current_role and current_content:
+                        # 格式化为原始格式：[日期] 角色: 内容
+                        if date_line:
+                            turn = f"[{date_line}] {current_role}: {current_content}"
+                        else:
+                            turn = f"{current_role}: {current_content}"
+                        turns.append(turn)
+
+                    # 开始新的turn
+                    if line.startswith('User said,'):
+                        current_role = 'user'
+                        content_part = line[len('User said,'):].strip()
+                    else:  # Assistant said,
+                        current_role = 'assistant'
+                        content_part = line[len('Assistant said,'):].strip()
+
+                    # 移除引号
+                    if content_part.startswith('"') and content_part.endswith('"'):
+                        content_part = content_part[1:-1]
+
+                    current_content = content_part
+                else:
+                    # 这是同一个turn的继续内容，追加到current_content
+                    if current_content:
+                        current_content += "\n" + line
+
+        # 处理最后一个turn
+        if current_role and current_content:
+            if date_line:
+                turn = f"[{date_line}] {current_role}: {current_content}"
+            else:
+                turn = f"{current_role}: {current_content}"
+            turns.append(turn)
+
+        return turns
+
+    def _build_config(self):
         tool_config_default = VERL_ROOT / "memagent" / "tool_config.yaml"
-        tool_config_path = Path(overrides.get("tool_config_path", tool_config_default))
+        tool_config_path = Path(tool_config_default)
         config_dict = {
             "actor_rollout_ref": {
                 "rollout": {
-                    "prompt_length": overrides.get("prompt_length", 8192),
-                    "response_length": overrides.get("response_length", 8192),
+                    "prompt_length": 8192,
+                    "response_length": 8192,
                     "multi_turn": {
-                        "max_user_turns": overrides.get("max_user_turns", 10),
-                        "max_assistant_turns": overrides.get("max_assistant_turns", 10),
-                        "max_parallel_calls": overrides.get("max_parallel_calls", 10),
-                        "max_tool_response_length": overrides.get("max_tool_response_length", 3000),
-                        "tool_response_truncate_side": overrides.get("tool_response_truncate_side", "left"),
+                        "max_assistant_turns": 100,
+                        "max_parallel_calls": 100,
+                        "max_tool_response_length": 8192,
+                        "tool_response_truncate_side": "left",
                         "tool_config_path": str(tool_config_path),
-                        "format": overrides.get("format", "hermes"),
-                        "max_chunk_size": overrides.get("max_chunk_size", 15000),
+                        "format": "hermes",
+                        "max_chunk_size": 15000,
                     },
                 },
             },
@@ -151,40 +225,19 @@ class VerlMemoryAgent(BaseAgent):
         }
         return OmegaConf.create(config_dict)
 
-    def reset(self) -> None:
-        self._context_chunks = []
-        self._context = ""
-
-    def prepare_sample(self, sample) -> None:
-        self.reset()
-
-    def add_memory(self, chunk: str) -> None:
+    async def add_memory_async(self, chunk: str) -> None:
         if not chunk:
             return
-        self._context_chunks.append(chunk)
-        # Filter out empty strings from splitlines to avoid warnings in EmbeddingRetrievalTool
-        # lines = [line for line in chunk.splitlines() if line.strip()]
-        # self._context_chunks.extend(lines)
-        self._context = "\n\n".join(self._context_chunks)
+        if chunk.startswith('Below is a conversation between user and assistant.'):
+            turns = self._parse_longmemeval_chunk(chunk)
+            self._context_chunks.extend(turns)
+        else:
+            # self._context_chunks.append(chunk)
+            subchunks = get_chunks(chunk, 1000)
+            self._context_chunks.extend(subchunks)
+        self.raw_chunks.append(chunk)
 
-    async def add_memory_async(self, chunk: str) -> None:
-        self.add_memory(chunk)
-
-    async def QA_async(self, query: str) -> str:
-        results = await self._run_agent_loop([query])
-        return results[0] if results else ""
-
-    def QA(self, query: str) -> str:
-        if self._is_async:
-            raise RuntimeError("Use QA_async() when the client is asynchronous")
-        return asyncio.run(self.QA_async(query))
-
-    def QA_batch(self, query_list: List[str], batch_size: int = 32) -> List[str]:
-        if self._is_async:
-            raise RuntimeError("Use QA_batch_async() when the client is asynchronous")
-        return asyncio.run(self.QA_batch_async(query_list))
-
-    async def QA_batch_async(self, query_list: List[str], save_intermediate: bool = False) -> List[str]:
+    async def QA_batch_async(self, query_list: List[str], save_intermediate: bool = True) -> List[str]:
         if not query_list:
             return []
         raw_result, outputs = await self._run_agent_loop(query_list)
@@ -226,12 +279,12 @@ class VerlMemoryAgent(BaseAgent):
             return r[-2000:]  # return last 2000 chars as fallback
         results = [try_remove_boxed(r) for r in results]
         if save_intermediate:
-            intermediate_path = Path(f"./tmp/intermediate_verl_outputs/{uuid4().hex}")
+            intermediate_path = Path(f"./tmp/intermediate_verl_outputs/{self.data_source}/{self.agent_id}/{uuid4().hex}")
             intermediate_path.mkdir(parents=True, exist_ok=True)
             for i, output in enumerate(outputs):
-                filename = intermediate_path / f"output_{i}.txt"
-                with open(filename, "w") as f:
-                    f.write(self._tokenizer.decode(output.prompt_ids))
+                filename = f"final_{i}.txt" if output.extra_fields["is_final"] else f"memory_{i}.txt"
+                with open(intermediate_path / filename, "w") as f:
+                    f.write(self._tokenizer.decode(output.prompt_ids + output.response_ids))
         return results
 
     async def _run_agent_loop(self, queries: Sequence[str]) -> List[str]:
@@ -260,14 +313,12 @@ class VerlMemoryAgent(BaseAgent):
             outputs = await agent_loop.run(
                 sampling_params=sampling_params,
                 raw_prompt=[{"role": "user", "content": queries}],
-                context=self._context,
-                memory_kwargs={
-                    "initial_memory": "",
-                    "chunk_size": self._max_chunk_size,
-                },
+                context="\n".join(self._context_chunks),
+                memory_kwargs={"initial_memory": ""},
                 tools_kwargs=self._build_tool_kwargs(memory_store_path),
-                verbose=True,
+                verbose=False,
                 data_source=self.data_source,
+                raw_chunks=self.raw_chunks if self.data_source == 'synth' else None,
             )
         finally:
             if memory_store_path.exists():

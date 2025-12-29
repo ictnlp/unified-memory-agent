@@ -45,6 +45,8 @@ def register_benchmark(name: str | None = None) -> Callable[[Callable[..., list[
     """Decorator to register benchmark loaders for easy discovery."""
     def decorator(func: Callable[..., list["EvalData"]]) -> Callable[..., list["EvalData"]]:
         key = name or func.__name__.removeprefix("load_")
+        if key in BENCHMARK_REGISTRY:
+            raise KeyError(f"Benchmark '{key}' is registered multiple times.")
         BENCHMARK_REGISTRY[key] = func
         return func
 
@@ -229,7 +231,8 @@ def load_locomo(force_rebuild=False):
                     breakpoint()
             else:
                 last_sess_id = num_sessions
-            sess_position = random.randint(last_sess_id, num_sessions)
+            # sess_position = random.randint(last_sess_id, num_sessions)
+            sess_position = num_sessions # 选择最后一个位置提问
             if qa['category'] == 2:
                 question = qa['question'] + ' Use DATE of CONVERSATION to answer with an approximate date.'
                 answer = qa['answer']
@@ -843,7 +846,7 @@ def load_synth(suf, force_rebuild=False) -> list[EvalData]:
     if os.path.exists(f"data/processed_synth-{suf}.json") and not force_rebuild:
         return load_from_path(f"data/processed_synth-{suf}.json")
     from synthv1_async import main
-    main(num_sessions=int(suf[1:]), out=f"data/processed_synth-{suf}.json", no_diversify=True)
+    main(num_sessions=int(''.join(filter(str.isdigit, suf))), out=f"data/processed_synth-{suf}.json", no_diversify=True)
     return load_from_path(f"data/processed_synth-{suf}.json")
 
 @register_benchmark()
@@ -958,9 +961,14 @@ if __name__ == '__main__':
     # load_synth("s3", force_rebuild=True)
     # load_synth("s50", force_rebuild=True)
     # load_infbench()
-    # load_synth("s10", force_rebuild=True)
-    load_trec_coarse(True)
-    load_banking77(True)
-    load_clinic(True)
-    load_nlu(True)
-    load_trec_fine(True)
+    # load_synth(f"ss5", force_rebuild=True)
+    # for session_num in [2,3,4,10,20,30,40,50]:
+    #     load_synth(f"ss{session_num}", force_rebuild=True)
+    # load_synth("ss10", force_rebuild=True)
+    # load_trec_coarse(True)
+    # load_banking77(True)
+    # load_clinic(True)
+    # load_nlu(True)
+    # load_trec_fine(True)
+
+    load_locomo(True)

@@ -19,6 +19,7 @@ from collections import Counter, defaultdict
 from rouge_score import rouge_scorer
 import asyncio
 from tqdm.asyncio import tqdm as atqdm
+import tqdm
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 # Use uvloop for better async performance if available
@@ -28,7 +29,7 @@ try:
 except ImportError:
     pass
 
-from config import DATASET_LOADERS, AGENT_CLASS, API_CONFIG_LOCAL
+from config import DATASET_LOADERS, AGENT_CLASS, API_CONFIG_LOCAL, API_CONFIG_REMOTE
 
 #如果存在环境变量OPENAI_API_BASE
 if 'OPENAI_API_BASE' in os.environ:
@@ -422,10 +423,13 @@ def load_dataset(task: str, force_rebuild: bool = False):
         raise ValueError(f"Unknown task: {task}")
     return DATASET_LOADERS[task](force_rebuild=force_rebuild)
 
-async def process_single_sample(sample, agent, output_file, task, semaphore, write_lock):
+async def process_single_sample(sample, agent_class, agent_kwargs, output_file, task, semaphore, write_lock):
     """Process a single sample asynchronously"""
     async with semaphore:
-        print(f"Processing sample: {sample.task_id}")
+        print(f"{agent_class.__name__} Processing sample: {sample.task_id}")
+
+        # Create agent instance for this sample
+        agent = agent_class(**agent_kwargs)
 
         if hasattr(agent, "reset"):
             agent.reset()
@@ -484,20 +488,33 @@ async def process_single_sample(sample, agent, output_file, task, semaphore, wri
         
         return len(results)
 
-async def generate_responses_async(task, agent_class, agent_config, agent_id, output_dir, concurrency=32, model_name='qwen3-4b'):
-    """Generate responses using specified agent with async concurrency"""
+async def generate_responses_async(task, agent_class, agent_config, agent_id, output_dir, concurrency=32, model_name='qwen3-4b', force_overwrite=False):
+    """Generate responses using specified agent with async concurrency
+
+    Args:
+        force_overwrite: If True, delete existing responses file and regenerate all responses
+    """
     print(f"Starting async generation for task: {task}, agent_id: {agent_id}, model: {model_name}")
     start_time = time.time()
-    
+
     # Load dataset
     eval_set = load_dataset(task)
-    
+
     # Create output file
     final_output_file = f"{output_dir}/responses_{agent_id}.jsonl"
-    
+
     # Check for existing partial results
     completed_qids = set()
-    if os.path.exists(final_output_file):
+    if force_overwrite:
+        if os.path.exists(final_output_file):
+            try:
+                os.remove(final_output_file)
+                print(f"Force overwrite enabled. Removed existing {final_output_file}")
+            except OSError as exc:
+                print(f"Warning: failed to remove {final_output_file}: {exc}")
+        else:
+            print("Force overwrite enabled but no existing responses file found to remove")
+    elif os.path.exists(final_output_file):
         print(f"Found existing output file: {final_output_file}")
         with open(final_output_file, 'r', encoding='utf-8') as f:
             for line in f:
@@ -535,34 +552,29 @@ async def generate_responses_async(task, agent_class, agent_config, agent_id, ou
     
     # Create tasks for all samples
     tasks = []
-    for sample in remaining_samples:
-        # Create a new agent instance for each sample to avoid state conflicts
+    for sample in tqdm.tqdm(remaining_samples, total=len(remaining_samples), desc="Scheduling samples"):
+        # Prepare agent kwargs for each sample
         if agent_class.__name__ == 'FileMemoryAgent':
-            agent = agent_class(client=client, task_type=task, task_id=sample.task_id)
+            agent_kwargs = {'client': client, 'task_type': task, 'task_id': sample.task_id}
         elif agent_class.__name__ == 'MemAgent':
-            # MemAgent uses wo_q parameter
             wo_q = agent_config.get('wo_q', False)
-            agent = agent_class(wo_q=wo_q, client=client, model_name=model_name)
+            agent_kwargs = {'wo_q': wo_q, 'client': client, 'model_name': model_name}
         elif agent_class.__name__ == 'MemAlphaUnifiedAgent':
-            agent = agent_class(model_name=model_name, client=client, **agent_config)
+            agent_kwargs = {'model_name': model_name, 'client': client, **agent_config}
         elif agent_class.__name__ == 'VerlMemoryAgent':
-            agent = agent_class(model_name=model_name, client=client, data_source={
-                "synth-s1": "synth",
-                "synth-s3": "synth",
-                "synth-s10": "synth",
-                "synth-s50": "synth",
+            agent_kwargs = {'model_name': model_name, 'client': client, 'data_source': {
                 "booksum": "memalpha_booksum",
                 "nlu": "memalpha_icl_nlu_8296shot_balance",
                 "perltqa": "memalpha_perltqa",
                 "pubmed_rct": "memalpha_pubmed-rct",
                 "trec_coarse": "memalpha_icl_trec_coarse_6600shot_balance",
                 "squad": "memalpha_squad",
-            }.get(task, task))
+            }.get(task, "synth" if task.startswith("synth") else task), 'agent_id': agent_id}
         else:
             # Other agents (ConcatAgent, EmergenceAgent) use model_name
-            agent = agent_class(model_name=model_name, client=client)
+            agent_kwargs = {'model_name': model_name, 'client': client}
 
-        task_coroutine = process_single_sample(sample, agent, final_output_file, task, semaphore, write_lock)
+        task_coroutine = process_single_sample(sample, agent_class, agent_kwargs, final_output_file, task, semaphore, write_lock)
         tasks.append(task_coroutine)
     
     # Process all tasks concurrently with progress bar
@@ -803,7 +815,7 @@ def get_args():
     parser.add_argument('--concurrency', type=int, default=32,
                         help='Number of concurrent tasks (default: 32)')
     parser.add_argument('--generate_only', action='store_true', help='Generate Only mode')
-    parser.add_argument('--force_overwrite', action='store_true',
+    parser.add_argument('--force-overwrite', action='store_true',
                         help='Re-evaluate all responses and overwrite existing evaluated files')
     return parser.parse_args()
 
@@ -845,7 +857,7 @@ async def main():
             raise ValueError(f"Unknown agent type: {args.agent}")
         
         responses_file = await generate_responses_async(
-            args.task, agent_class, agent_config, args.agent_id, output_dir, args.concurrency, args.model
+            args.task, agent_class, agent_config, args.agent_id, output_dir, args.concurrency, args.model, args.force_overwrite
         )
         
         if not args.generate_only:

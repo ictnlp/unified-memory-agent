@@ -5,11 +5,15 @@ import os
 import json
 import glob
 import argparse
+import re
 from collections import defaultdict
 from datetime import datetime
 from typing import Dict, List, Optional
 
 from prettytable import PrettyTable
+import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use('Agg')  # 使用非交互式后端
 
 import sys
 sys.path.append('.')
@@ -151,6 +155,12 @@ def calculate_task_statistics(agent_results, task):
             
             # Get category from original data
             category = qid_to_category.get(qid, 'unknown')
+            
+            # Skip abstention_evidence category for convomem task
+            if task == 'convomem' and category != 'user_evidence':
+                continue
+            # if task == 'locomo' and category == 5:
+            #     continue
             
             # Collect all numeric metrics
             for metric_name, value in metrics.items():
@@ -328,7 +338,31 @@ def generate_summary_table(summary_scores: Dict[str, Dict[str, float]], tasks: L
     sorted_tasks = sorted(tasks)
     table = PrettyTable()
     table.title = "LLM Score Summary"
-    table.field_names = ['Agent'] + [task.upper() for task in sorted_tasks]
+    table.field_names = ['Agent'] + [task.upper() for task in sorted_tasks] + ['AVG']
+
+    # Find max value for each task (column) excluding -1 and None
+    max_values_by_task = {}
+    for task in sorted_tasks:
+        valid_values = [
+            summary_scores[agent].get(task)
+            for agent in summary_scores.keys()
+            if summary_scores[agent].get(task) is not None and summary_scores[agent].get(task) != -1
+        ]
+        max_values_by_task[task] = max(valid_values) if valid_values else None
+
+    # Calculate max average across all agents
+    agent_averages = {}
+    for agent in summary_scores.keys():
+        valid_scores = [
+            score for score in summary_scores[agent].values()
+            if score is not None and score != -1
+        ]
+        if valid_scores:
+            agent_averages[agent] = sum(valid_scores) / len(valid_scores)
+        else:
+            agent_averages[agent] = None
+    
+    max_avg = max([avg for avg in agent_averages.values() if avg is not None], default=None)
 
     for agent in sorted(summary_scores.keys()):
         row = [agent]
@@ -336,8 +370,22 @@ def generate_summary_table(summary_scores: Dict[str, Dict[str, float]], tasks: L
             value = summary_scores[agent].get(task)
             if value is None or value == -1:
                 row.append('-')
+            elif max_values_by_task[task] is not None and abs(value - max_values_by_task[task]) < 1e-6:
+                # Bold green for SOTA value (bright and eye-catching)
+                row.append(f"\033[1;32m{value:.4f}\033[0m")
             else:
                 row.append(f"{value:.4f}")
+        
+        # Add average column
+        avg_value = agent_averages[agent]
+        if avg_value is None:
+            row.append('-')
+        elif max_avg is not None and abs(avg_value - max_avg) < 1e-6:
+            # Bold green for best average
+            row.append(f"\033[1;32m{avg_value:.4f}\033[0m")
+        else:
+            row.append(f"{avg_value:.4f}")
+        
         table.add_row(row)
 
     return table
@@ -371,6 +419,74 @@ def save_response_table(response_table: PrettyTable, results_dir: str):
         f.write("=" * 80 + "\n\n")
         f.write(str(response_table) + "\n")
     print(f"Response availability table saved to: {output_file}")
+
+
+def extract_session_count(task_name: str) -> Optional[int]:
+    """Extract session count from task names like synth-ss4, synth-ss10, etc."""
+    match = re.match(r'synth-ss(\d+)', task_name)
+    if match:
+        return int(match.group(1))
+    return None
+
+
+def plot_session_scaling(summary_scores: Dict[str, Dict[str, float]],
+                         tasks: List[str],
+                         results_dir: str):
+    """Plot performance curves for synth-ss benchmarks with different session counts."""
+
+    # Filter synth-ss tasks and extract session counts
+    synth_tasks = []
+    for task in tasks:
+        session_count = extract_session_count(task)
+        if session_count is not None:
+            synth_tasks.append((task, session_count))
+
+    if not synth_tasks:
+        print("\nNo synth-ss benchmarks found for plotting.")
+        return
+
+    # Sort by session count
+    synth_tasks.sort(key=lambda x: x[1])
+
+    # Prepare data for plotting
+    agent_data = defaultdict(lambda: {'sessions': [], 'scores': []})
+
+    for task, session_count in synth_tasks:
+        for agent_name, scores in summary_scores.items():
+            if task in scores and scores[task] is not None and scores[task] != -1:
+                agent_data[agent_name]['sessions'].append(session_count)
+                agent_data[agent_name]['scores'].append(scores[task])
+
+    if not agent_data:
+        print("\nNo valid data for synth-ss benchmarks plotting.")
+        return
+
+    # Create plot
+    plt.figure(figsize=(12, 8))
+
+    # Plot each agent's curve
+    for agent_name in sorted(agent_data.keys()):
+        data = agent_data[agent_name]
+        if data['sessions']:
+            plt.plot(data['sessions'], data['scores'],
+                    marker='o', linewidth=2, markersize=8,
+                    label=agent_name)
+
+    plt.xlabel('Number of Sessions', fontsize=14, fontweight='bold')
+    plt.ylabel('Accuracy', fontsize=14, fontweight='bold')
+    plt.title('Agent Performance vs Session Count (synth-ss benchmarks)',
+              fontsize=16, fontweight='bold', pad=20)
+    plt.legend(loc='best', fontsize=11, framealpha=0.9)
+    plt.grid(True, alpha=0.3, linestyle='--')
+    plt.tight_layout()
+
+    # Save plot
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    output_file = os.path.join(results_dir, f"synth_session_scaling_{timestamp}.png")
+    plt.savefig(output_file, dpi=300, bbox_inches='tight')
+    print(f"\nSession scaling plot saved to: {output_file}")
+    plt.close()
+
 
 def main():
     args = parse_args()
@@ -476,6 +592,9 @@ def main():
             save_response_table(response_table, args.results_dir)
     else:
         print("\nNo response files detected across tasks.")
+
+    # Generate session scaling plot for synth-ss benchmarks
+    plot_session_scaling(summary_scores, tasks, args.results_dir)
 
 if __name__ == "__main__":
     main()
