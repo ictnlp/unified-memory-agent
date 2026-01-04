@@ -13,8 +13,8 @@ import string
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
 
-import aiohttp
 import torch
+from openai import AsyncOpenAI
 from rank_bm25 import BM25Okapi
 from sentence_transformers import util
 
@@ -86,7 +86,7 @@ class AddTool(BaseTool):
         Returns:
             Tuple of (response, reward, metrics)
         """
-        title = arguments.get("title")
+        title = arguments.get("title") or arguments.get("key")
         content = arguments.get("content")
         filename = self._instance_dict[instance_id]["filename"]
         if title is None or content is None:
@@ -176,7 +176,7 @@ class UpdateTool(BaseTool):
         Returns:
             Tuple of (response, reward, metrics)
         """
-        title = arguments.get("title")
+        title = arguments.get("title") or arguments.get("key")
         content = arguments.get("content")
         new_title = arguments.get("new_title")
         filename = self._instance_dict[instance_id]["filename"]
@@ -291,7 +291,7 @@ class DeleteTool(BaseTool):
         Returns:
             Tuple of (response, reward, metrics)
         """
-        title = arguments.get("title")
+        title = arguments.get("title") or arguments.get("key")
         filename = self._instance_dict[instance_id]["filename"]
         if title is None:
             return ToolResponse(text="Missing title"), 0, {"error": "missing_title"}
@@ -379,7 +379,7 @@ class RetrieveTool(BaseTool):
         Returns:
             Tuple of (response, reward, metrics)
         """
-        title = arguments.get("title")
+        title = arguments.get("title") or arguments.get("key")
         filename = self._instance_dict[instance_id]["filename"]
         if title is None:
             return ToolResponse(text="Missing title"), 0, {"error": "missing_title"}
@@ -638,14 +638,18 @@ class EmbeddingRetrievalTool(BaseTool):
     def __init__(self, config: dict, tool_schema: Optional[OpenAIFunctionToolSchema] = None):
         super().__init__(config, tool_schema)
         self._instance_dict = {}
-        self.endpoint = os.environ['EMBEDDING_SERVICE_ENDPOINT']
-        connector = aiohttp.TCPConnector(limit=100, limit_per_host=50)
+
+        # Initialize OpenAI client for embeddings
+        self.endpoint = os.environ.get('EMBEDDING_SERVICE_ENDPOINT', 'http://localhost:8080/v1')
         timeout_cfg = self.config.get("embedding_timeout", 300.0)
-        timeout = aiohttp.ClientTimeout(total=float(timeout_cfg))        
-        self.session = aiohttp.ClientSession(connector=connector, timeout=timeout)
+        self.client = AsyncOpenAI(
+            base_url=self.endpoint.replace("/embeddings", ""),
+            api_key=os.environ.get('OPENAI_API_KEY', 'dummy-key'),  # Some services don't require real keys
+            timeout=float(timeout_cfg)
+        )
 
     async def close(self):
-        await self.session.close()
+        await self.client.close()
 
     def get_openai_tool_schema(self) -> OpenAIFunctionToolSchema:
         return OpenAIFunctionToolSchema(
@@ -759,128 +763,90 @@ class EmbeddingRetrievalTool(BaseTool):
         if instance_id in self._instance_dict:
             del self._instance_dict[instance_id]
 
-    async def _fetch_embeddings_deprecated(self, texts: List[str]) -> torch.Tensor:
-        if not texts:
-            raise ValueError("No texts provided for embedding computation.")
-
-        model_name = self.config.get("embedding_model", self.DEFAULT_MODEL)
-        payload = {"input": texts, "model": model_name}
-        # timeout_cfg = self.config.get("embedding_timeout", 300.0)
-        # client_timeout = aiohttp.ClientTimeout(total=float(timeout_cfg) if timeout_cfg else None)
-        max_retries = 3
-        backoff = 1
-        for attempt in range(max_retries):
-            try:
-                async with self.session.post(self.endpoint, json=payload) as response:
-                    if response.status != 200:
-                        body = await response.text()
-                        # 如果是 5xx 错误（服务端挂了），抛出异常触发重试
-                        if response.status >= 500:
-                            raise RuntimeError(f"Server Error {response.status}")
-                        # 如果是 4xx 错误（参数不对），直接报错不重试
-                        raise ValueError(f"Client Error {response.status}: {body[:200]}")
-                    
-                    data = await response.json()
-                    break
-
-            except (aiohttp.ClientError, asyncio.TimeoutError, RuntimeError) as exc:
-                if attempt == max_retries - 1:
-                    logger.error(f"Failed after {max_retries} retries: {exc}")
-                    raise exc
-                
-                logger.warning(f"Retry {attempt + 1}/{max_retries} due to: {exc}. Waiting {backoff}s")
-                await asyncio.sleep(backoff)
-                backoff *= 2  # 指数退避，给服务端喘息机会
-
-        vectors = data.get("data")
-        if not vectors:
-            raise RuntimeError("Embedding 服务返回数据为空或缺少 'data' 字段。")
-
-        embeddings: List[torch.Tensor] = []
-        for item in vectors:
-            embedding = item.get("embedding") if isinstance(item, dict) else None
-            if embedding is None:
-                raise RuntimeError("Embedding 服务返回格式不正确，缺少 embedding 字段。")
-            embeddings.append(torch.tensor(embedding, dtype=torch.float32))
-
-        return torch.stack(embeddings)
-
     async def _fetch_embeddings(self, documents):
         """
-        内部自动分批处理 Embedding 请求，解决 422 长度超限问题。
+        使用OpenAI客户端获取embeddings，支持批处理和异步并行。
+        使用 asyncio.gather 并行处理多个批次，同时使用 semaphore 控制并发数。
         """
         if not documents:
             return []
 
-        # --- 配置区域 ---
-        # 1. 单次请求的最大文本数 (Infinity 限制 2048，设 512 留余量且效率高)
         BATCH_SIZE = 512
-        # 2. 并发控制：同时最多允许多少个 HTTP 请求在飞 (防止把服务端打挂)
-        # 10 * 512 = 5120 条文本同时处理，这对 Infinity 来说很轻松
-        CONCURRENT_LIMIT = 10 
-        # ----------------
-        
-        sem = asyncio.Semaphore(CONCURRENT_LIMIT)
+        MAX_CONCURRENT_BATCHES = 10
+
         total_docs = len(documents)
-        
-        # 定义处理单个 Batch 的内部函数
-        async def fetch_single_batch(batch_texts):
-            async with sem:  # 限制并发数
-                payload = {
-                    "model": self.config.get("embedding_model", self.DEFAULT_MODEL),
-                    "input": batch_texts
-                }
-                
-                # 使用你的共享 session
-                # 注意：这里建议加上简单的重试逻辑，防止网络抖动
+
+        # 创建 semaphore 控制并发数
+        semaphore = asyncio.Semaphore(MAX_CONCURRENT_BATCHES)
+
+        async def fetch_single_batch(batch_texts, batch_idx):
+            """处理单个批次的embedding请求，带并发控制"""
+            async with semaphore:  # 控制并发数
+                model_name = self.config.get("embedding_model", self.DEFAULT_MODEL)
+
+                # 重试逻辑，防止网络抖动和速率限制
                 for attempt in range(5):
                     try:
-                        async with self.session.post(self.endpoint, json=payload) as response:
-                            if response.status != 200:
-                                # 如果是 422，说明即便分批了还是有问题（比如单条文本过长），直接抛出
-                                if response.status == 422:
-                                    body = await response.text()
-                                    raise ValueError(f"422 Error: {body}")
-                                
-                                # 其他错误（500等）可以重试
-                                if response.status >= 500:
-                                    raise RuntimeError(f"Server Error {response.status}")
-                                    
-                                body = await response.text()
-                                raise RuntimeError(f"Error {response.status}: {body[:200]}")
-                            
-                            data = await response.json()
-                            # 提取 embedding 列表
-                            return [item['embedding'] for item in data['data']]
-                            
+                        response = await self.client.embeddings.create(
+                            input=batch_texts,
+                            model=model_name
+                        )
+
+                        # 提取embedding向量
+                        embeddings = [item.embedding for item in response.data]
+
+                        # 日志记录处理进度
+                        if total_docs > BATCH_SIZE:
+                            logger.info(f"Batch {batch_idx+1} completed: {len(batch_texts)} documents")
+
+                        return batch_idx, embeddings
+
                     except Exception as e:
-                        if attempt == 2: # 最后一次重试也失败
-                            raise e
-                        await asyncio.sleep(1 * (attempt + 1))
+                        error_msg = str(e)
 
-        # --- 核心逻辑：切分与 Gather ---
-        
-        tasks = []
-        # 使用 range 函数步长切片
+                        # 检查是否是速率限制错误(429)
+                        if '429' in error_msg or 'rate limit' in error_msg.lower():
+                            if attempt < 4:  # 还有重试机会
+                                wait_time = 2 ** (attempt + 1)  # 2s, 4s, 8s, 16s
+                                logger.warning(f"Batch {batch_idx+1}: Rate limit error, retrying in {wait_time}s (attempt {attempt+1}/5)")
+                                await asyncio.sleep(wait_time)
+                                continue
+                            raise RuntimeError(f"Batch {batch_idx+1}: Rate limit error after 5 retries: {error_msg}")
+
+                        # 检查是否是输入过长错误
+                        if '422' in error_msg or 'invalid' in error_msg.lower():
+                            raise ValueError(f"Batch {batch_idx+1}: Invalid input error: {error_msg}")
+
+                        # 服务器错误可以重试
+                        if attempt < 4:
+                            wait_time = 2 * (attempt + 1)  # 2s, 4s, 6s, 8s
+                            logger.warning(f"Batch {batch_idx+1}: API error, retrying in {wait_time}s: {error_msg}")
+                            await asyncio.sleep(wait_time)
+                        else:
+                            raise
+
+        # 将文档分批
+        batches = []
         for i in range(0, total_docs, BATCH_SIZE):
-            # 切出当前批次
             batch = documents[i : i + BATCH_SIZE]
-            # 创建任务
-            tasks.append(fetch_single_batch(batch))
+            batch_idx = i // BATCH_SIZE
+            batches.append((batch, batch_idx))
 
-        # 并发执行所有批次
-        # 注意：asyncio.gather 保证返回结果的顺序与 tasks 添加顺序一致
-        # 所以不用担心结果乱序
-        batch_results = await asyncio.gather(*tasks)
-        
-        # --- 结果合并 ---
-        
-        # batch_results 是一个二维列表：[[emb1, emb2], [emb3, emb4], ...]
-        # 我们需要把它展平成一维列表：[emb1, emb2, emb3, emb4, ...]
-        final_embeddings = [emb for batch in batch_results for emb in batch]
-        
-        # 简单的完整性校验
+        logger.info(f"Processing {total_docs} documents in {len(batches)} batches with max concurrency={MAX_CONCURRENT_BATCHES}")
+
+        # 并行处理所有批次
+        tasks = [fetch_single_batch(batch, idx) for batch, idx in batches]
+        results = await asyncio.gather(*tasks)
+
+        # 按照原始顺序重组结果
+        sorted_results = sorted(results, key=lambda x: x[0])  # 按batch_idx排序
+        final_embeddings = []
+        for batch_idx, batch_embeddings in sorted_results:
+            final_embeddings.extend(batch_embeddings)
+
+        # 结果校验
         if len(final_embeddings) != total_docs:
             raise RuntimeError(f"Embedding count mismatch! Sent {total_docs}, got {len(final_embeddings)}")
 
+        logger.info(f"Successfully processed all {total_docs} documents")
         return torch.tensor(final_embeddings)

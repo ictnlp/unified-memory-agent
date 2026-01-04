@@ -1,67 +1,45 @@
+BASE_DIR="/mnt/pfs-guan-ssai/nlu/zhangkehao/unified-memory-agent"
 export EMBEDDING_SERVICE_ENDPOINT="http://localhost:8080/embeddings"
-export PROMPT_TEMPLATE_PATH="/mnt/pfs-guan-ssai/nlu/zhangkehao/unified-memory-agent/prompt_template.yaml"
-# MODEL=/mnt/pfs-guan-ssai/nlu/zhangkehao/unified-memory-agent/external/verl/checkpoints/tool_memagent/qwen3-4b_GRPOv4/global_step_500/global_step_500/hf
-MODEL=/mnt/pfs-guan-ssai/nlu/zhangkehao/unified-memory-agent/external/verl/checkpoints/tool_memagent/qwen3-4b_GRPOv4_onlysearch/global_step_766/hf
-AGENT_ID=toolmem766onlysearch
+export PROMPT_TEMPLATE_PATH="${BASE_DIR}/prompt_template.yaml"
+MODEL=${BASE_DIR}/external/verl/checkpoints/tool_memagent/qwen3-4b_GRPO_synth/global_step_20/hf
+AGENT_ID=toolmem20synth
+# MODEL=Qwen/Qwen3-4B-Instruct-2507
+# AGENT_ID=base_onlysearch
+TASKS="synth-ss2 synth-ss5 synth-ss10 synth-ss20 synth-ss30 synth-ss40 synth-ss50 synth-ss500 synth-ss100"
 # 定义清理函数
 function kill_vllm_by_port() {
-    local port=\$1
-    
-    # 1. 使用 ss 替代 lsof 查找 PID
-    # grep ":$port " 确保精确匹配端口（避免匹配到 80001 这种）
-    local pid=$(ss -lpnt | grep ":$port " | grep -oE 'pid=[0-9]+' | awk -F'=' '{print \$2}')
-    
-    if [ -n "$pid" ]; then
-        echo "Found vLLM process on port $port (PID: $pid)..."
-        
-        # 2. 发送 SIGINT (信号 2)，完全等同于按下 Ctrl+C
-        # 这是让 vLLM 优雅退出、自动释放显存的关键
-        echo "Sending SIGINT (Ctrl+C) to allow graceful shutdown..."
-        kill -2 $pid 2>/dev/null
-        
-        # 3. 等待进程退出 (最多等待 15 秒)
-        # vLLM 优雅退出通常需要几秒钟来关闭 Ray worker
-        for i in {1..15}; do
-            if ! kill -0 $pid 2>/dev/null; then
-                echo "Process $pid terminated gracefully."
-                break
-            fi
-            sleep 1
-            echo "Waiting for vLLM to cleanup (attempt $i/15)..."
-        done
-        
-        # 4. 超时兜底：如果还在运行，只强制杀死该 PID 及其子进程
-        if kill -0 $pid 2>/dev/null; then
-            echo "Process stuck. Force killing PID $pid and its children..."
-            
-            # -P 指定父进程PID，只杀这个父进程下的子进程 (Ray worker)
-            # 这样不会影响其他无关的 vLLM 服务
-            pkill -9 -P $pid 2>/dev/null
-            
-            # 杀掉主进程
-            kill -9 $pid 2>/dev/null
-        fi
-        
-        # 5. 等待端口释放 (使用 ss 检查)
-        echo "Waiting for port $port to be free..."
-        for i in {1..10}; do
-            # 如果 ss 查不到该端口了，说明释放成功
-            if ! ss -lnt | grep -q ":$port "; then
-                echo "Port $port is free."
-                return 0
-            fi
-            sleep 1
-        done
-        
-        echo "Warning: Port $port might still be in use or in TIME_WAIT."
-        
-    else
-        echo "No process found on port $port."
+    local port=$1
+    # 优化 PID 提取：利用 ss 的过滤器功能，减少 grep/awk 管道
+    local pid=$(ss -lptn "sport = :$port" | grep -oE 'pid=[0-9]+' | cut -d= -f2)
+
+    if [ -z "$pid" ]; then
+        echo "No process on port $port."
+        return
     fi
+
+    echo "Stopping vLLM (PID: $pid)..."
+    kill -2 "$pid" # 发送 SIGINT
+
+    # 等待循环：利用 kill -0 检查进程是否存在
+    for i in {1..15}; do
+        kill -0 "$pid" 2>/dev/null || break # 进程消失则跳出循环
+        sleep 1
+    done
+
+    # 兜底强制查杀
+    if kill -0 "$pid" 2>/dev/null; then
+        echo "Force killing PID $pid and children..."
+        pkill -9 -P "$pid"  # 杀子进程 (Ray workers)
+        kill -9 "$pid"      # 杀主进程
+    fi
+
+    echo "Cleanup finished for port $port."
+    echo "Waiting for GPU resources to be released..."
+    sleep 15  # 等待GPU资源完全释放（CUDA上下文、显存、Ray workers等）
 }
 
 kill_vllm_by_port 8000
-vllm serve $MODEL -dp 2 -tp 4 > vllm.log 2>&1 &
+vllm serve $MODEL -dp 2 -tp 4 --gpu-memory-utilization 0.8 --enforce-eager > vllm.log 2>&1 &
 # source /mnt/pfs-guan-ssai/nlu/zhangkehao/unified-memory-agent/external/infinity/.venv/bin/activate
 # cd libs/infinity_emb
 # uv pip install -e ".[all]"
@@ -81,28 +59,26 @@ until curl -s http://localhost:8000/health > /dev/null 2>&1; do
     echo "wait for server port 8000..."
 done
 
-for TASK in synth-s10 synth-s1 synth-s3 synth-s50 banking77 booksum clinic hotpotqa locomo longmemeval msc nlu perltqa pubmed_rct trec_coarse trec_fine squad infbench convomem
+for TASK in $TASKS
 do
     python evaluate_async.py \
         --task $TASK \
         --agent toolmem \
         --model $MODEL \
         --agent_id $AGENT_ID \
-        --concurrency 50 \
+        --concurrency 10 \
         --output_dir results/qwen3-4b/$TASK \
         --generate_only
 done
 
 kill_vllm_by_port 8000
-kill_vllm_by_port 8080
-
-CUDA_VISIBLE_DEVICES=4,5,6,7 vllm serve Qwen/Qwen3-30B-A3B-Instruct-2507 -tp 4 > vllm_judge.log 2>&1 &
+CUDA_VISIBLE_DEVICES=4,5,6,7 vllm serve Qwen/Qwen3-30B-A3B-Instruct-2507 -tp 4 --max-model-len 262144 --gpu-memory-utilization 0.8 > vllm_judge.log 2>&1 &
 until curl -s http://localhost:8000/health > /dev/null 2>&1; do
     sleep 2
     echo "wait for server port 8000..."
 done
 
-for TASK in synth-s10 synth-s1 synth-s3 synth-s50 banking77 booksum clinic hotpotqa locomo longmemeval msc nlu perltqa pubmed_rct trec_coarse trec_fine squad infbench convomem
+for TASK in $TASKS
 do
     INPUT_FILE="results/qwen3-4b/$TASK/responses_${AGENT_ID}.jsonl"
     OUTPUT_DIR="results/qwen3-4b/$TASK"
@@ -111,7 +87,10 @@ do
             --task $TASK \
             --concurrency 256 \
             --input_file "$INPUT_FILE" \
-            --output_dir "$OUTPUT_DIR"
+            --output_dir "$OUTPUT_DIR" \
+            --force-overwrite
     fi
 done
 kill_vllm_by_port 8000
+
+[ -n "$USE_SMALL_VALSETS" ] && python generate_stats.py --results_dir results/qwen3-4b-small/ || python generate_stats.py

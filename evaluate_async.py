@@ -462,7 +462,10 @@ async def process_single_sample(sample, agent_class, agent_kwargs, output_file, 
 
             # Time the QA batch processing
             batch_start_time = time.time()
-            responses = await agent.QA_batch_async(queries)
+            if agent_class.__name__ == 'VerlMemoryAgent':
+                responses, intermediate_path = await agent.QA_batch_async(queries, save_intermediate=True)
+            else:
+                responses = await agent.QA_batch_async(queries)
             batch_end_time = time.time()
             batch_duration = batch_end_time - batch_start_time
             
@@ -477,6 +480,8 @@ async def process_single_sample(sample, agent_class, agent_kwargs, output_file, 
                     'response': response,
                     'generation_time': per_question_time
                 }
+                if agent_class.__name__ == 'VerlMemoryAgent' and intermediate_path:
+                    result['intermediate_paths'] = str(intermediate_path)
                 results.append(result)
         
         # Write all results to file at once (with file lock for thread safety)
@@ -624,6 +629,8 @@ async def evaluate_single_response(item, evaluator, results_file, semaphore, wri
         # Add generation_time if it exists
         if 'generation_time' in item:
             result['generation_time'] = item['generation_time']
+        if 'intermediate_paths' in item:
+            result['intermediate_paths'] = item['intermediate_paths']
 
         # Write result to file with shared async lock
         async with write_lock:

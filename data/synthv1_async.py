@@ -529,7 +529,7 @@ async def async_main(
             print(f"\n=== Generating dataset {dataset_idx + 1}/{num_records} ===")
 
         print(f"{prefix}Generating time points...")
-        start_date = datetime(2024, 1, 1)
+        start_date = datetime(2023, 1, 1)
         end_date = datetime(2024, 12, 31)
         dates = generate_dates(start_date, end_date, num_sessions)
         print(f"{prefix}Generated {len(dates)} dates: {dates[0]} to {dates[-1]}")

@@ -278,6 +278,7 @@ class VerlMemoryAgent(BaseAgent):
                 return extracted.strip()
             return r[-2000:]  # return last 2000 chars as fallback
         results = [try_remove_boxed(r) for r in results]
+        intermediate_path = None
         if save_intermediate:
             intermediate_path = Path(f"./tmp/intermediate_verl_outputs/{self.data_source}/{self.agent_id}/{uuid4().hex}")
             intermediate_path.mkdir(parents=True, exist_ok=True)
@@ -285,7 +286,7 @@ class VerlMemoryAgent(BaseAgent):
                 filename = f"final_{i}.txt" if output.extra_fields["is_final"] else f"memory_{i}.txt"
                 with open(intermediate_path / filename, "w") as f:
                     f.write(self._tokenizer.decode(output.prompt_ids + output.response_ids))
-        return results
+        return results, intermediate_path
 
     async def _run_agent_loop(self, queries: Sequence[str]) -> List[str]:
         server_manager = ClientCompletionsServerManager(
@@ -305,7 +306,7 @@ class VerlMemoryAgent(BaseAgent):
         sampling_params = {
             "temperature": 0.0,
             "max_tokens": self._max_response_tokens,
-            "repetition_penalty": 1.05,
+            # "repetition_penalty": 1.05,
             # "stop": ["</tool_call>"],
         }
 

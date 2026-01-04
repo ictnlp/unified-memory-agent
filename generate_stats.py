@@ -141,7 +141,7 @@ def calculate_task_statistics(agent_results, task):
             continue
             
         agent_stats = {
-            'total_questions': len(results),
+            # 'total_questions': len(results),
             'agent': agent_name
         }
         
@@ -161,6 +161,8 @@ def calculate_task_statistics(agent_results, task):
                 continue
             # if task == 'locomo' and category == 5:
             #     continue
+            if task.startswith('synth') and not (category == 'max_scene' or category == 'single_date_scene_amount' or category == 'time_range_multiple_scenes_amount'):
+                continue
             
             # Collect all numeric metrics
             for metric_name, value in metrics.items():
@@ -190,7 +192,7 @@ def calculate_task_statistics(agent_results, task):
                 else:
                     agent_stats['categories'][category][f'{metric_name}_avg'] = sum(values) / len(values) if values else 0
                 agent_stats['categories'][category][f'{metric_name}_count'] = len(values)
-        
+        agent_stats['total_questions'] = sum(len(list(category_metrics.values())[0]) for category_metrics in category_stats.values())
         stats[agent_name] = agent_stats
     
     return stats
@@ -319,25 +321,27 @@ def save_tables_to_file(tables, task, results_dir):
     print(f"Statistics saved to: {output_file}")
 
 
-def save_summary_table(summary_table: PrettyTable, results_dir: str):
-    """Persist the cross-task summary table."""
+def save_summary_table(summary_table: PrettyTable, results_dir: str, title: str, filename_prefix: str):
+    """Persist a cross-task summary table."""
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    output_file = os.path.join(results_dir, f"summary_llm_scores_{timestamp}.txt")
+    output_file = os.path.join(results_dir, f"{filename_prefix}_{timestamp}.txt")
     with open(output_file, 'w', encoding='utf-8') as f:
-        f.write(f"LLM Score Summary\nGenerated at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"{title}\nGenerated at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
         f.write("=" * 80 + "\n\n")
         f.write(str(summary_table) + "\n")
     print(f"Summary table saved to: {output_file}")
 
 
-def generate_summary_table(summary_scores: Dict[str, Dict[str, float]], tasks: List[str]) -> Optional[PrettyTable]:
-    """Create a table with agents as rows and tasks as columns for llm_score."""
+def generate_summary_table(summary_scores: Dict[str, Dict[str, float]],
+                           tasks: List[str],
+                           title: str = "LLM Score Summary") -> Optional[PrettyTable]:
+    """Create a table with agents as rows and tasks as columns for a metric."""
     if not summary_scores:
         return None
 
     sorted_tasks = sorted(tasks)
     table = PrettyTable()
-    table.title = "LLM Score Summary"
+    table.title = title
     table.field_names = ['Agent'] + [task.upper() for task in sorted_tasks] + ['AVG']
 
     # Find max value for each task (column) excluding -1 and None
@@ -464,17 +468,30 @@ def plot_session_scaling(summary_scores: Dict[str, Dict[str, float]],
     # Create plot
     plt.figure(figsize=(12, 8))
 
+    # Agent name mapping for display
+    name_map = {
+        'concat16k': 'Concat',
+        'rag16k': 'RAG(k=20)',
+        'memagent': 'MemAgent',
+        'memagent_woq': 'MemAgent-woq',
+        'mem1': 'Mem1',
+        'memalphav1': 'MemAlpha',
+        'toolmem90v4continualv2promptv2': 'UMA',
+        'toolmem20synth': 'UMA',
+    }
+
     # Plot each agent's curve
     for agent_name in sorted(agent_data.keys()):
         data = agent_data[agent_name]
         if data['sessions']:
+            display_name = name_map.get(agent_name.lower(), agent_name)
             plt.plot(data['sessions'], data['scores'],
                     marker='o', linewidth=2, markersize=8,
-                    label=agent_name)
+                    label=display_name)
 
     plt.xlabel('Number of Sessions', fontsize=14, fontweight='bold')
     plt.ylabel('Accuracy', fontsize=14, fontweight='bold')
-    plt.title('Agent Performance vs Session Count (synth-ss benchmarks)',
+    plt.title('Ledger-QA benchmarks (Agent Performance vs Session Count)',
               fontsize=16, fontweight='bold', pad=20)
     plt.legend(loc='best', fontsize=11, framealpha=0.9)
     plt.grid(True, alpha=0.3, linestyle='--')
@@ -510,6 +527,9 @@ def main():
         print(f"Ignoring agents from {ignore_path}:", ", ".join(sorted(ignored_agents)))
 
     summary_scores: Dict[str, Dict[str, float]] = defaultdict(dict)
+    summary_exact_match: Dict[str, Dict[str, float]] = defaultdict(dict)
+    summary_f1: Dict[str, Dict[str, float]] = defaultdict(dict)
+    summary_rouge: Dict[str, Dict[str, float]] = defaultdict(dict)
     response_presence: Dict[str, Dict[str, bool]] = defaultdict(dict)
 
     for task in tasks:
@@ -545,9 +565,17 @@ def main():
             if agent_name in ignored_agents:
                 continue
             llm_score = agent_stats.get('llm_score_avg')
-            if llm_score is None:
-                continue
-            summary_scores[agent_name][task] = llm_score
+            if llm_score is not None:
+                summary_scores[agent_name][task] = llm_score
+            exact_match = agent_stats.get('exact_match_avg')
+            if exact_match is not None:
+                summary_exact_match[agent_name][task] = exact_match
+            f1_score = agent_stats.get('f1_score_avg')
+            if f1_score is not None:
+                summary_f1[agent_name][task] = f1_score
+            rouge_score = agent_stats.get('rouge_score_avg')
+            if rouge_score is not None:
+                summary_rouge[agent_name][task] = rouge_score
 
         # Generate tables
         overall_table = generate_overall_table(stats, task)
@@ -571,16 +599,49 @@ def main():
         for agent, results in agent_results.items():
             print(f"  - {agent}: {len(results)} questions")
 
-    summary_table = generate_summary_table(summary_scores, tasks)
+    summary_table = generate_summary_table(summary_scores, tasks, title="LLM Score Summary")
     if summary_table:
         print(f"\n{'='*60}")
         print("Cross-task LLM Score Summary")
         print(f"{'='*60}")
         print(summary_table)
         if args.save_txt:
-            save_summary_table(summary_table, args.results_dir)
+            save_summary_table(summary_table, args.results_dir, "LLM Score Summary", "summary_llm_scores")
     else:
         print("\nNo LLM score data available to build the summary table.")
+
+    exact_match_table = generate_summary_table(summary_exact_match, tasks, title="Exact Match Summary")
+    if exact_match_table:
+        print(f"\n{'='*60}")
+        print("Cross-task Exact Match Summary")
+        print(f"{'='*60}")
+        print(exact_match_table)
+        if args.save_txt:
+            save_summary_table(exact_match_table, args.results_dir, "Exact Match Summary", "summary_exact_match")
+    elif summary_exact_match:
+        print("\nExact match data available but no summary table could be generated.")
+
+    f1_table = generate_summary_table(summary_f1, tasks, title="F1 Summary")
+    if f1_table:
+        print(f"\n{'='*60}")
+        print("Cross-task F1 Summary")
+        print(f"{'='*60}")
+        print(f1_table)
+        if args.save_txt:
+            save_summary_table(f1_table, args.results_dir, "F1 Summary", "summary_f1_scores")
+    elif summary_f1:
+        print("\nF1 data available but no summary table could be generated.")
+
+    rouge_table = generate_summary_table(summary_rouge, tasks, title="ROUGE Summary")
+    if rouge_table:
+        print(f"\n{'='*60}")
+        print("Cross-task ROUGE Summary")
+        print(f"{'='*60}")
+        print(rouge_table)
+        if args.save_txt:
+            save_summary_table(rouge_table, args.results_dir, "ROUGE Summary", "summary_rouge_scores")
+    elif summary_rouge:
+        print("\nROUGE data available but no summary table could be generated.")
 
     response_table = generate_response_presence_table(response_presence, tasks)
     if response_table:

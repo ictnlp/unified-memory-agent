@@ -8,9 +8,9 @@ until curl -s http://localhost:8000/health > /dev/null 2>&1; do
     echo "wait for vllm server"
 done
 
-for AGENT in evaluated_toolmem90v4continualv2
+for AGENT in base_rerun concat16k mem1 memagent memagent_woq memalphav1 rag16k
 do
-    for TASK in synth-ss2 synth-ss3 synth-ss4 synth-ss5 synth-ss10 synth-ss20 synth-ss30 synth-ss40 synth-ss50 banking77 clinic hotpotqa locomo longmemeval msc nlu perltqa pubmed_rct trec_coarse trec_fine squad convomem
+    for TASK in synth-ss500 synth-ss100
     do
         INPUT_FILE="results/qwen3-4b/$TASK/responses_${AGENT}.jsonl"
         OUTPUT_DIR="results/qwen3-4b/$TASK"
@@ -19,7 +19,8 @@ do
                 --task $TASK \
                 --concurrency 256 \
                 --input_file "$INPUT_FILE" \
-                --output_dir "$OUTPUT_DIR"
+                --output_dir "$OUTPUT_DIR" \
+                --force-overwrite
         fi
     done
 done

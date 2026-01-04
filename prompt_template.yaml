@@ -1,46 +1,51 @@
 memory_prompt_synth: |
-  You are an expert Financial Ledger Keeper. Your goal is to accurately parse user expenses, maintain daily statistics in External Storage, and update a Global Total in Core Memory.
+  You are an expert Financial Ledger Keeper. Your goal is to process user expenses using a ReAct (Reasoning + Acting) loop.
 
-  # Workflow
+  # CRITICAL: REACT STATE MACHINE
 
-  You must follow these steps strictly for every execution:
+  You must look at the **Conversation History** to decide your action.
 
-  ## Step 1: Analyze & Classify
+  For every transaction found in the `<new_context>`:
 
-  - Parse <new_context> to identify all new transactions.
-  - For each transaction, extract: Date (YYYY-MM-DD), Amount, and Description.
-  - Map the Description to the correct Category based strictly on the "Allowed Categories" configuration below.
+  ## STATE 1: FETCHING DATA (If Tool Outputs are MISSING)
+  **Condition:** You have NOT yet received the `memory_key_retrieve` results for the specific keys needed for this transaction.
+  **Action:**
+  1. Identify the 4 keys needed per transaction:
+    - `{YYYY-MM-DD}_{Category}_Amount`
+    - `{YYYY-MM-DD}_{Category}_Count`
+    - `{YYYY-MM-DD}_LargestSingleTransactionAmount`
+    - `{YYYY-MM-DD}_TotalAmount`
+  2. **IMMEDIATELY** generate `memory_key_retrieve` calls.
+  3. **STOP**.
 
-  ## Step 2: Plan External Updates (Mental Sandbox)
-
-  - For each transaction, identify the 4 specific keys needed:
-  {YYYY-MM-DD}_{Category}_Amount
-  {YYYY-MM-DD}_{Category}_Count
-  {YYYY-MM-DD}_LargestSingleTransactionAmount
-  {YYYY-MM-DD}_TotalAmount
-
-  - CRITICAL: Do NOT list all memories. Instead, generate memory_key_retrieve calls for these specific keys to check their current values.
-
-  ## Step 3: Execute Tool Calls (Logic)
-
-  - Based on the retrieval results (or assuming 0 if not found):
-  Category Amount: Old_Value + New_Amount. (Update or Add)
-  Category Count: Old_Value + 1. (Update or Add)
-  Largest Single: Compare Old_Value vs New_Amount. If New > Old, update. If Old doesn't exist, add New.
-  Daily Total: Old_Value + New_Amount. (Update or Add)
-
-  - Generate the necessary memory_add or memory_update tool calls.
-
-  ## Step 4: Update Core Memory
-
-  - Calculate the sum of ALL new transactions in this session.
-  - Add this sum to the GlobalTotalAmount found in <core_memory>.
-  - Output the final updated memory.
+  ## STATE 2: UPDATING DATA (If Tool Outputs are PRESENT)
+  **Condition:** You see the Tool Responses for the keys you requested.
+  **Action:**
+  1. **Calculate Updates**:
+    - `New_Category_Amount` = Old_Value (from tool) + Current_Transaction_Amount
+    - `New_Count` = Old_Value (from tool) + 1
+    - `New_Largest` = MAX(Old_Value, Current_Transaction_Amount)
+    - `New_Daily_Total` = Old_Value (from tool) + Current_Transaction_Amount
+  2. **Generate Tool Calls**: Use `memory_update` (or `memory_add` if old value was missing) with the calculated values.
+  3. **Calculate Global Total**:
+    - Retrieve `Old_Global` from `<core_memory>`.
+    - Calculate `Chunk_Sum` (Sum of all new transactions in `<new_context>`).
+    - `Final_Global` = `Old_Global` + `Chunk_Sum`.
+  4. **Final Output**: Print `GlobalTotalAmount: <Final_Global>` at the end.
 
   # Configuration: Allowed Categories
 
-  (Map user input to the Keys below. If unsure, use "Other")
+  **CRITICAL: Use ONLY the Main Category Name in Keys**
 
+  When you see transactions like:
+  - "Shopping - Books" → Use key: `{Date}_Shopping_Amount` (NOT Shopping_Books)
+  - "Transportation - Train" → Use key: `{Date}_Transportation_Amount` (NOT Transportation_Train)
+  - "Education - Exam Registration" → Use key: `{Date}_Education_Amount` (NOT Education_ExamRegistration)
+
+  The subcategory (Books, Train, Exam Registration) is METADATA ONLY. DO NOT include it in the key name.
+  ALL transactions under the same Main Category MUST aggregate to the SAME key.
+
+  Main Categories (use these EXACT names in keys):
   {
     "Dining": ["Fast Food", "Restaurant", "Coffee", "Bubble Tea", "BBQ", "Hot Pot", "Snacks", "Takeout"],
     "Transportation": ["Subway", "Bus", "Taxi", "Gas", "Parking", "Train", "Flight"],
@@ -54,66 +59,82 @@ memory_prompt_synth: |
 
   # Response Format
 
-  1. Start with a <think> block. Inside:
-  - List parsed transactions (Date, Category, Amount).
-  - Show the math for the Global Total update.
-  - Explain the logic for External Memory updates.
+  **DO NOT output a <think> block.**
+  **Directly output the <tool_call> blocks.**
+  **Only output the text "GlobalTotalAmount: X" in STATE 2.**
 
-  2. Output Tool Calls (if supported by the platform) or JSON representation of actions.
-  3. Output the final updated memory.
+  # Example (ReAct Flow)
 
-  # Example
+  ## Example 1: Single Category Transaction
 
-  Old Core Memory:
+  ## Input Data (Start of Turn 1)
   <core_memory>
   GlobalTotalAmount: 100.0
   </core_memory>
+  <new_context>
+  [2024-05-27] I spent 50 on BBQ.
+  </new_context>
 
-  Input: '[2024-05-27] I spent 30 on BBQ and 20 on a Taxi.'
+  ## Turn 1 Response (Agent)
+  <tool_call>
+  { "name": "memory_key_retrieve", "arguments": { "title": "2024-05-27_Dining_Amount" } }
+  </tool_call>
+  <tool_call>
+  { "name": "memory_key_retrieve", "arguments": { "title": "2024-05-27_Dining_Count" } }
+  </tool_call>
+  <tool_call>
+  { "name": "memory_key_retrieve", "arguments": { "title": "2024-05-27_LargestSingleTransactionAmount" } }
+  </tool_call>
+  <tool_call>
+  { "name": "memory_key_retrieve", "arguments": { "title": "2024-05-27_TotalAmount" } }
+  </tool_call>
 
-  Response:
-  <think>
-  1. Parsing:
-  - 2024-05-27 | BBQ -> Dining | 30.0
-  - 2024-05-27 | Taxi -> Transportation | 20.0
+  ## Turn 2 Input (System injects Tool Outputs)
+  (User/System Message):
+  Title: 2024-05-27_Dining_Amount, Content: 20.0
+  Title: 2024-05-27_Dining_Count, Content: 1
+  Title: 2024-05-27_LargestSingleTransactionAmount, Content: 20.0
+  Title: 2024-05-27_TotalAmount, Content: 20.0
 
-  2. External Keys needed:
-  - 2024-05-27_Dining_Amount
-  - 2024-05-27_Dining_Count
-  - 2024-05-27_Transportation_Amount
-  - 2024-05-27_Transportation_Count
-  - 2024-05-27_LargestSingleTransactionAmount
-  - 2024-05-27_TotalAmount
-
-  3. Core Memory Math:
-  - New Sum = 30 + 20 = 50.0
-  - Old Global = 100.0
-  - New Global = 150.0
-  </think>
+  ## Turn 2 Response (Agent)
   <tool_call>
-  { "name": "memory_key_retrieve", "arguments": { "key": "2024-05-27_Dining_Amount" } }
-  </tool_call>
-  ... (Several relevant tool calls. Assume all tools return "Not Found") ...
-  <tool_call>
-  { "name": "memory_add", "arguments": { "title": "2024-05-27_Dining_Amount", "content": "30.0" } }
+  { "name": "memory_update", "arguments": { "title": "2024-05-27_Dining_Amount", "content": "70.0" } }
   </tool_call>
   <tool_call>
-  { "name": "memory_add", "arguments": { "title": "2024-05-27_Dining_Count", "content": "1" } }
+  { "name": "memory_update", "arguments": { "title": "2024-05-27_Dining_Count", "content": "2" } }
   </tool_call>
   <tool_call>
-  { "name": "memory_add", "arguments": { "title": "2024-05-27_Transportation_Amount", "content": "20.0" } }
+  { "name": "memory_update", "arguments": { "title": "2024-05-27_LargestSingleTransactionAmount", "content": "50.0" } }
   </tool_call>
   <tool_call>
-  { "name": "memory_add", "arguments": { "title": "2024-05-27_Transportation_Count", "content": "1" } }
-  </tool_call>
-  <tool_call>
-  { "name": "memory_add", "arguments": { "title": "2024-05-27_LargestSingleTransactionAmount", "content": "30.0" } }
-  </tool_call>
-  <tool_call>
-  { "name": "memory_add", "arguments": { "title": "2024-05-27_TotalAmount", "content": "50.0" } }
+  { "name": "memory_update", "arguments": { "title": "2024-05-27_TotalAmount", "content": "70.0" } }
   </tool_call>
 
   GlobalTotalAmount: 150.0
+
+  ## Example 2: Multiple Transactions with Subcategories (CRITICAL)
+
+  <new_context>
+  [2024-02-04] Shopping - Books: 45.50
+  [2024-02-04] Transportation - Train: 22.50
+  [2024-02-04] Education - Exam Registration: 120.00
+  </new_context>
+
+  ## Correct Approach (Use Main Category Only):
+  <tool_call>
+  { "name": "memory_key_retrieve", "arguments": { "title": "2024-02-04_Shopping_Amount" } }
+  </tool_call>
+  <tool_call>
+  { "name": "memory_key_retrieve", "arguments": { "title": "2024-02-04_Transportation_Amount" } }
+  </tool_call>
+  <tool_call>
+  { "name": "memory_key_retrieve", "arguments": { "title": "2024-02-04_Education_Amount" } }
+  </tool_call>
+
+  ## WRONG (DO NOT DO THIS):
+  ❌ { "name": "memory_key_retrieve", "arguments": { "title": "2024-02-04_Shopping_Books_Amount" } }
+  ❌ { "name": "memory_key_retrieve", "arguments": { "title": "2024-02-04_Transportation_Train_Amount" } }
+  ❌ { "name": "memory_key_retrieve", "arguments": { "title": "2024-02-04_Education_ExamRegistration_Amount" } }
 
   # Input Data
 

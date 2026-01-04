@@ -19,7 +19,7 @@ export X_CHJ_GWTOKEN="eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiI5OHFnRkVlc
 # Long Range Understanding (LRU): infbench, booksum
 
 # for AGENT in concat emergence memagent memalpha rag gam
-# for TASK in synth-ss2 synth-ss3 synth-ss4 synth-ss5 synth-ss10 synth-ss20 synth-ss30 synth-ss40 synth-ss50 banking77 booksum clinic hotpotqa locomo longmemeval msc nlu perltqa pubmed_rct trec_coarse trec_fine squad infbench convomem
+# for TASK in synth-ss2 synth-ss5 synth-ss10 synth-ss20 synth-ss30 synth-ss40 synth-ss50 banking77 booksum clinic hotpotqa locomo longmemeval msc nlu perltqa pubmed_rct trec_coarse trec_fine squad infbench convomem
 until curl -s http://localhost:8080/health > /dev/null 2>&1; do
     sleep 2
     echo "wait for server port 8080..."
@@ -34,48 +34,56 @@ done
 #     echo "wait for server port 8001..."
 # done
 
-for TASK in synth-ss2 synth-ss3 synth-ss4 synth-ss5 synth-ss10 synth-ss20 synth-ss30 synth-ss40 synth-ss50 banking77 clinic hotpotqa locomo longmemeval msc nlu perltqa pubmed_rct trec_coarse trec_fine squad convomem
-do
-    python evaluate_async.py \
-        --task $TASK \
-        --agent toolmem \
-        --agent_id evaluated_toolmem90v4continualv2 \
-        --model /mnt/pfs-guan-ssai/nlu/zhangkehao/unified-memory-agent/external/verl/checkpoints/tool_memagent/qwen3-4b_GRPOv4_continualv2/global_step_90/hf \
-        --concurrency 10 \
-        --output_dir results/qwen3-4b/$TASK \
-        --force-overwrite \
-        --generate_only
-done
-
-# vllm serve Qwen/Qwen3-4B-Instruct-2507 -tp 4 -dp 2 --max-model-len 262144 --enable-chunked-prefill --max-num-batched-tokens 512
-# for AGENT in concat
+# for TASK in synth-ss500 synth-ss100
 # do
-#     for TASK in locomo
-#     do
-#         python evaluate_async.py \
-#             --task $TASK \
-#             --agent $AGENT \
-#             --agent_id concat16k \
-#             --concurrency 50 \
-#             --output_dir results/qwen3-4b-locomo/$TASK \
-#             --generate_only
-#     done
+#     python evaluate_async.py \
+#         --task $TASK \
+#         --agent toolmem \
+#         --agent_id base_rerun \
+#         --concurrency 10 \
+#         --output_dir results/qwen3-4b/$TASK \
+#         --generate_only
 # done
 
-# for TASK in locomo
+# vllm serve Qwen/Qwen3-4B-Instruct-2507 -tp 4 -dp 2 --max-model-len 262144 --enable-chunked-prefill --max-num-batched-tokens 512
+# for TASK in synth-ss500 synth-ss100
+# do
+#     python evaluate_async.py \
+#         --task $TASK \
+#         --agent concat \
+#         --agent_id concat16k \
+#         --concurrency 50 \
+#         --output_dir results/qwen3-4b/$TASK \
+#         --generate_only
+# done
+
+# for TASK in synth-ss500 synth-ss100
 # do
 #     python evaluate_async.py \
 #         --task $TASK \
 #         --agent rag \
 #         --agent_id rag16k \
 #         --concurrency 50 \
-#         --output_dir results/qwen3-4b-locomo/$TASK \
+#         --output_dir results/qwen3-4b/$TASK \
 #         --generate_only
+# done
+
+# for AGENT in memagent memagent_woq
+# do
+#     for TASK in synth-ss500 synth-ss100
+#     do
+#         python evaluate_async.py \
+#             --task $TASK \
+#             --agent $AGENT \
+#             --concurrency 50 \
+#             --output_dir results/qwen3-4b/$TASK \
+#             --generate_only
+#     done
 # done
 
 # CUDA_VISIBLE_DEVICES=4,5,6,7 vllm serve Qwen/Qwen3-4B-Instruct-2507 -tp 4 --max-model-len 262144 --port 8001 > vllm1.log 2>&1 &
 # CUDA_VISIBLE_DEVICES=0,1,2,3 vllm serve YuWangX/Memalpha-4B -tp 4 --rope-scaling '{"rope_type":"yarn","factor":4.0,"original_max_position_embeddings":32768}' --max-model-len 131072 > vllm0.log 2>&1 &
-# for TASK in locomo
+# for TASK in synth-ss500 synth-ss100
 # do
 #     python evaluate_async.py \
 #         --task $TASK \
@@ -83,20 +91,20 @@ done
 #         --agent_id memalphav1 \
 #         --model YuWangX/Memalpha-4B \
 #         --concurrency 50 \
-#         --output_dir results/qwen3-4b-locomo/$TASK \
+#         --output_dir results/qwen3-4b/$TASK \
 #         --generate_only
 # done
 
 
 # CUDA_VISIBLE_DEVICES=0,1,2,3 vllm serve Mem-Lab/Qwen2.5-7B-RL-RAG-Q2-EM-Release -tp 4 --rope-scaling '{"rope_type":"yarn","factor":4.0,"original_max_position_embeddings":32768}' --max-model-len 131072 > vllm0.log 2>&1 &
 # CUDA_VISIBLE_DEVICES=4,5,6,7 vllm serve Qwen/Qwen3-4B-Instruct-2507 -tp 4 --max-model-len 262144 --port 8001 > vllm1.log 2>&1 &
-# for TASK in locomo
-# do
-#     python evaluate_async.py \
-#         --task $TASK \
-#         --agent mem1 \
-#         --model Mem-Lab/Qwen2.5-7B-RL-RAG-Q2-EM-Release \
-#         --concurrency 50 \
-#         --output_dir results/qwen3-4b-locomo/$TASK \
-#         --generate_only
-# done
+for TASK in synth-ss500 synth-ss100
+do
+    python evaluate_async.py \
+        --task $TASK \
+        --agent mem1 \
+        --model Mem-Lab/Qwen2.5-7B-RL-RAG-Q2-EM-Release \
+        --concurrency 50 \
+        --output_dir results/qwen3-4b/$TASK \
+        --generate_only
+done

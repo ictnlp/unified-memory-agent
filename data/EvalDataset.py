@@ -859,7 +859,11 @@ def load_convomem(force_rebuild=False) -> list[EvalData]:
     """
     file_path = "data/processed_convomem.json"
     if os.path.exists(file_path) and not force_rebuild:
-        return load_from_path(file_path)
+        convomem_data = load_from_path(file_path)
+        for item in convomem_data:
+            item.questions = [q for q in item.questions if q.category == "user_evidence"]
+        convomem_data = [item for item in convomem_data if item.questions]
+        return convomem_data
 
     from pathlib import Path
     base_dir = Path("/mnt/pfs-guan-ssai/nlu/zhangkehao/ConvoMem/ConvoMem/core_benchmark/pre_mixed_testcases")
@@ -915,7 +919,7 @@ def load_convomem(force_rebuild=False) -> list[EvalData]:
                 question_text = evidence_item.get('question', '')
                 answer_text = evidence_item.get('answer', '')
 
-                if not question_text:
+                if not question_text or category != "user_evidence":
                     continue
 
                 questions.append(Question(
@@ -964,6 +968,8 @@ if __name__ == '__main__':
     # load_synth(f"ss5", force_rebuild=True)
     # for session_num in [2,3,4,10,20,30,40,50]:
     #     load_synth(f"ss{session_num}", force_rebuild=True)
+    load_synth("ss100")
+    load_synth("ss500")
     # load_synth("ss10", force_rebuild=True)
     # load_trec_coarse(True)
     # load_banking77(True)
@@ -971,4 +977,4 @@ if __name__ == '__main__':
     # load_nlu(True)
     # load_trec_fine(True)
 
-    load_locomo(True)
+    # load_locomo(True)

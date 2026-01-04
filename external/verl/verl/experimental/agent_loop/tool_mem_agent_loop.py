@@ -301,6 +301,8 @@ class ToolMemoryAgentLoop(AgentLoopBase):
             # Split context into chunks
             if kwargs.get('raw_chunks') is not None:
                 context_chunks = kwargs['raw_chunks']
+            elif data_source == 'synth':
+                context_chunks = self.retrieve_chunks
             else:
                 chunk_size = self.max_chunk_size
                 context_chunks = get_chunks(context_text, chunk_size)
@@ -428,19 +430,52 @@ class ToolMemoryAgentLoop(AgentLoopBase):
         # Extract tool calls if tool parser is available
         agent_data.tool_calls = []
         agent_data.failed_tool_calls = []
-        tool_start_id = self.tokenizer.convert_tokens_to_ids("<tool_call>")
-        tool_end_id = self.tokenizer.convert_tokens_to_ids("</tool_call>")
         if self.tool_parser:
-            _, agent_data.tool_calls, num_tools, agent_data.failed_tool_calls = await self.tool_parser.extract_tool_calls(response_ids, return_failed_and_num_tools=True)
-            agent_data.current_num_tools += response_ids.count(tool_start_id)
+            # extract_tool_calls already decodes the text, so we reuse it
+            response_text, agent_data.tool_calls, num_tools, agent_data.failed_tool_calls = await self.tool_parser.extract_tool_calls(response_ids, return_failed_and_num_tools=True)
+            # Count tool tags in decoded text to match extract_tool_calls logic (avoid token ID mismatch)
+            # Note: response_text is actually 'content' with matched tool calls removed by regex
+            # So remaining tags are unpaired/failed ones
+            actual_start_count = response_text.count(self.tool_parser.tool_call_start_token)
+            actual_end_count = response_text.count(self.tool_parser.tool_call_end_token)
+
+            # [DEBUG] Check for negative increment bug
+            # increment = successful tools + failed tags
+            increment = num_tools + actual_start_count + actual_end_count
+            if increment < 0:
+                logger.error("="*80)
+                logger.error(f"❌ NEGATIVE INCREMENT DETECTED: {increment}")
+                logger.error(f"   actual_start_count (unpaired tags in content): {actual_start_count}")
+                logger.error(f"   actual_end_count (unpaired tags in content): {actual_end_count}")
+                logger.error(f"   num_tools (successfully parsed): {num_tools}")
+                logger.error(f"   old current_num_tools: {agent_data.current_num_tools}")
+                logger.error(f"   Full response_text (content with matched tools removed):\n{response_text}")
+                logger.error(f"   tool_calls parsed: {agent_data.tool_calls}")
+                logger.error(f"   failed_tool_calls: {agent_data.failed_tool_calls}")
+                logger.error("="*80)
+
+            agent_data.current_num_tools += increment
         if num_tools:
+            # Pre-encode tool call tokens for efficient lookup
+            tool_start_ids = self.tokenizer.encode(self.tool_parser.tool_call_start_token, add_special_tokens=False)
+            tool_end_ids = self.tokenizer.encode(self.tool_parser.tool_call_end_token, add_special_tokens=False)
+
             def remove_last_tool_call():
                 """Remove the last tool call from response_ids."""
-                # Find the last occurrence of <tool_call> and </tool_call>
-                end_idx = len(response_ids) - 1 - response_ids[::-1].index(tool_end_id)
-                start_idx = len(response_ids[:end_idx]) - 1 - response_ids[:end_idx][::-1].index(tool_start_id)
-                if start_idx != -1 and end_idx != -1 and start_idx < end_idx:
-                    del response_ids[start_idx:end_idx + 1]
+                # Find the last occurrence of <tool_call> and </tool_call> tag sequences
+                def find_last_sequence(response, sequence):
+                    seq_len = len(sequence)
+                    for i in range(len(response) - seq_len, -1, -1):
+                        if response[i:i+seq_len] == sequence:
+                            return i
+                    return -1
+
+                end_idx = find_last_sequence(response_ids, tool_end_ids)
+                if end_idx == -1:
+                    return
+                start_idx = find_last_sequence(response_ids[:end_idx], tool_start_ids)
+                if start_idx != -1 and start_idx < end_idx:
+                    del response_ids[start_idx:end_idx + len(tool_end_ids)]
             while len(agent_data.current_response_ids) + len(response_ids) > self.response_length - 500 and num_tools > 0:
                 remove_last_tool_call()
                 num_tools -= 1
@@ -560,6 +595,7 @@ class ToolMemoryAgentLoop(AgentLoopBase):
                 add_special_tokens=False
             )
             response_ids = response_ids[:-5] + middle_prompt_ids + response_ids[-5:] + append_prompt_ids  # generation_prompt是最后5个token，需要保留
+        response_ids = [self.tokenizer.convert_tokens_to_ids('Ċ')] + response_ids
         # Update prompt_ids and response_mask
         agent_data.current_prompt_ids += response_ids
         agent_data.current_response_ids += response_ids
@@ -635,7 +671,7 @@ class ToolMemoryAgentLoop(AgentLoopBase):
         MEMORY_PROMPT_TEMPLATE = PROMPT_TEMPLATE.get(prompt_key, PROMPT_TEMPLATE["memory_prompt_default"])
         FULL_MEMORY_PROMPT_TEMPLATE = self.tokenizer.apply_chat_template(
             [{"role": "user", "content": MEMORY_PROMPT_TEMPLATE}],
-            tools=self.tool_schemas if self.tools else None,
+            tools=[schema for schema in self.tool_schemas if schema['function']['name'] not in ['memory_bm25_retrieve', 'memory_embedding_retrieve']],
             add_generation_prompt=True,
             tokenize=False,
             **self.apply_chat_template_kwargs,
@@ -661,7 +697,7 @@ class ToolMemoryAgentLoop(AgentLoopBase):
         prompt_text = messages[0]["content"] if messages[0]["role"] == "user" else messages[1]["content"]
         FULL_FINAL_PROMPT_TEMPLATE = self.tokenizer.apply_chat_template(
             [{"role": "user", "content": FINAL_PROMPT_TEMPLATE}],
-            tools=self.tool_schemas if self.tools else None,
+            tools=[schema for schema in self.tool_schemas if schema['function']['name'] not in ['memory_add', 'memory_update', 'memory_delete']],
             add_generation_prompt=True,
             tokenize=False,
             **self.apply_chat_template_kwargs,
