@@ -155,8 +155,8 @@ def calculate_task_statistics(agent_results, task):
             
             # Get category from original data
             category = qid_to_category.get(qid, 'unknown')
-            
-            # Skip abstention_evidence category for convomem task
+
+            # Skip non-user_evidence categories for convomem task (only evaluate user_evidence)
             if task == 'convomem' and category != 'user_evidence':
                 continue
             # if task == 'locomo' and category == 5:

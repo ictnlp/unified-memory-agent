@@ -1,16 +1,16 @@
-BASE_DIR="/mnt/pfs-guan-ssai/nlu/zhangkehao/unified-memory-agent"
+export BASE_DIR="path/to/unified-memory-agent"
 export EMBEDDING_SERVICE_ENDPOINT="http://localhost:8080/embeddings"
 export PROMPT_TEMPLATE_PATH="${BASE_DIR}/prompt_template.yaml"
-# export VERL_QA_MODEL_NAME="${BASE_DIR}/external/verl/checkpoints/tool_memagent/qwen3-4b_stage2_qa/global_step_63/hf"
+
 MODEL=dp66/UMA-4B
 AGENT_ID=UMA
-RESULTS_DIR="results/qwen3-4b"
+RESULTS_DIR="results"
 
-TASKS="synth-ss2 synth-ss5 synth-ss10 synth-ss20 synth-ss30 synth-ss40 synth-ss50 banking77 booksum clinic hotpotqa locomo longmemeval msc nlu perltqa pubmed_rct trec_coarse trec_fine squad infbench convomem"
-# 定义清理函数
+TASKS="synth-ss2 synth-ss5"
+# FULL TASKS: "synth-ss2 synth-ss5 synth-ss10 synth-ss20 synth-ss30 synth-ss40 synth-ss50 banking77 booksum clinic hotpotqa locomo longmemeval msc nlu perltqa pubmed_rct trec_coarse trec_fine squad infbench convomem"
+
 function kill_vllm_by_port() {
     local port=$1
-    # 优化 PID 提取：利用 ss 的过滤器功能，减少 grep/awk 管道
     local pid=$(ss -lptn "sport = :$port" | grep -oE 'pid=[0-9]+' | cut -d= -f2)
 
     if [ -z "$pid" ]; then
@@ -39,18 +39,15 @@ function kill_vllm_by_port() {
     sleep 15  # 等待GPU资源完全释放（CUDA上下文、显存、Ray workers等）
 }
 
+# GENERATION PHASE
+
 kill_vllm_by_port 8000
 vllm serve $MODEL -dp 2 -tp 4 --gpu-memory-utilization 0.8 --enforce-eager > vllm.log 2>&1 &
-# source /mnt/pfs-guan-ssai/nlu/zhangkehao/unified-memory-agent/external/infinity/.venv/bin/activate
-# cd libs/infinity_emb
-# uv pip install -e ".[all]"
-# uv pip install click==8.1.8
-# cd /mnt/pfs-guan-ssai/nlu/zhangkehao/unified-memory-agent
-# infinity_emb v2 --model-id sentence-transformers/all-MiniLM-L6-v2 --port 8080 > infinity_emb.log 2>&1 &
-# source /mnt/pfs-guan-ssai/nlu/zhangkehao/.venv/bin/activate
+kill_vllm_by_port 8080
+source ${BASE_DIR}/external/infinity/.venv/bin/activate
+infinity_emb v2 --model-id sentence-transformers/all-MiniLM-L6-v2 --port 8080 > infinity_emb.log 2>&1 &
+source .venv/bin/activate
 
-# for AGENT in concat emergence memagent memalpha rag gam
-# for TASK in synth-s10 synth-s1 synth-s3 synth-s50 banking77 booksum clinic hotpotqa locomo longmemeval msc nlu perltqa pubmed_rct trec_coarse trec_fine squad infbench convomem
 until curl -s http://localhost:8080/health > /dev/null 2>&1; do
     sleep 2
     echo "wait for server port 8080..."
@@ -71,6 +68,8 @@ do
         --output_dir $RESULTS_DIR/$TASK \
         --generate_only
 done
+
+# EVALUATION PHASE
 
 kill_vllm_by_port 8000
 CUDA_VISIBLE_DEVICES=4,5,6,7 vllm serve Qwen/Qwen3-30B-A3B-Instruct-2507 -tp 4 --max-model-len 262144 --gpu-memory-utilization 0.8 > vllm_judge.log 2>&1 &
@@ -93,5 +92,7 @@ do
     fi
 done
 kill_vllm_by_port 8000
+
+# SHOW RESULTS TABLE
 
 python generate_stats.py --results_dir $RESULTS_DIR

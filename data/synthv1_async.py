@@ -10,16 +10,9 @@ from collections import defaultdict
 from tqdm import tqdm
 from tqdm.asyncio import tqdm_asyncio
 from openai import AsyncOpenAI
+from json_repair import repair_json
+import fire
 
-try:
-    from json_repair import repair_json
-except ImportError:
-    repair_json = None
-
-try:
-    import fire
-except ImportError:  # pragma: no cover - optional dependency for CLI usage
-    fire = None
 
 # Consumption scene definitions (scene name: subscene list)
 CONSUMPTION_SCENES = {
@@ -42,11 +35,11 @@ CONSUMPTION_SCENES = {
 
 DEFAULT_MODEL = "gemini-3-pro-preview"
 API_CONFIG = {
-    "base_url": "http://api-hub.inner.chj.cloud/llm-gateway/v1",
+    "base_url": os.getenv("REMOTE_API_BASE", "http://localhost:8000/v1"),
     "api_key": "sk-EMPTY",
     "default_headers": {
         "BCS-APIHub-RequestId": str(uuid.uuid4()),
-        "X-CHJ-GWToken": 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiI5OHFnRkVlcEFVeEM4Qk91UUZJVDNXQUwwTG9OV0NQaSJ9.vTX_oU2rXrrgkPK5_RU76b2gRLpwlCxZ346mvCdug7A',
+        "X-CHJ-GWToken": os.getenv("X_CHJ_GWTOKEN"),
     },
     "max_retries": 100
 }

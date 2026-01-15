@@ -24,6 +24,8 @@ if [ $RANK = "0" ]; then
     ray start --head --dashboard-host=0.0.0.0
     python3 -m verl.trainer.main_ppo \
         +ray_kwargs.ray_init.runtime_env.env_vars.HF_HUB_OFFLINE=\"1\" \
+        +ray_kwargs.ray_init.runtime_env.env_vars.PROMPT_TEMPLATE_PATH=\"/lpai/volumes/base-agentos-lx-my/zhangkehao/unified-memory-agent/prompt_template.yaml\" \
+        +ray_kwargs.ray_init.runtime_env.env_vars.EMBEDDING_SERVICE_ENDPOINT=\"http://localhost:8080/embeddings\" \
         algorithm.adv_estimator=grpo \
         data.train_batch_size=64 \
         data.max_prompt_length=8192 \

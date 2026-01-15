@@ -1,87 +1,39 @@
 import importlib
 
-from data.EvalDataset import (
-    load_locomo,
-    load_longmemeval,
-    load_hotpotqa,
-    load_msc,
-    load_memalpha,
-    load_trec_coarse,
-    load_banking77,
-    load_clinic,
-    load_nlu,
-    load_trec_fine,
-    load_booksum,
-    load_perltqa,
-    load_pubmed_rct,
-    load_synth,
-    load_squad,
-    load_infbench,
-    load_convomem,
-)
+from data.EvalDataset import BENCHMARK_REGISTRY
+from data.EvalDataset import load_hotpotqa, load_synth
 import uuid
 from functools import partial
 
 from dotenv import load_dotenv
-load_dotenv(".env") # 默认会找项目根目录的 .env
+load_dotenv(".env") # default to .env in project root
 import os
-import httpx
 
-# Configuration
+# Version for pyproject.toml
+VERSION = "0.1.0"
+
+# Configuration - API endpoints are configured via environment variables
 API_CONFIG_REMOTE = {
-    "base_url": "http://api-hub.inner.chj.cloud/llm-gateway/v1",
+    "base_url": os.getenv("REMOTE_API_BASE", "http://localhost:8000/v1"),
     "api_key": "sk-",
     "default_headers": {
         "BCS-APIHub-RequestId": str(uuid.uuid4()),
-        "X-CHJ-GWToken": os.getenv("X_CHJ_GWTOKEN"),  # 环境变量名改为X_CHJ_GWTOKEN
+        "X-CHJ-GWToken": os.getenv("X_CHJ_GWTOKEN")
     },
     "max_retries": 100
 }
-JUDGE_MODEL_NAME = "azure-gpt-4o"
-# MODEL_NAME = "azure-gpt-4_1"
 
 API_CONFIG_LOCAL = {
     "base_url": "http://127.0.0.1:8000/v1",
     "api_key": "EMPTY",
-    "max_retries": 3,  # 降低重试次数，快速失败
-    "timeout": 180.0,  # 增加到3分钟，应对长推理
-    "http_client": httpx.AsyncClient(
-        limits=httpx.Limits(
-            max_connections=500,           # 增加连接池
-            max_keepalive_connections=200, # 增加保活连接
-            keepalive_expiry=2.0           # ✅ 空闲2秒回收，不影响运行中的请求
-        ),
-        timeout=httpx.Timeout(
-            180.0,        # ✅ 总超时3分钟，允许长推理
-            connect=5.0,  # ✅ 连接建立5秒超时，快速发现连接问题
-            read=180.0,   # ✅ 读取超时3分钟
-            write=10.0    # 写入超时10秒
-        )
-    )
+    "max_retries": 100,
 }
 MODEL_NAME = "Qwen/Qwen3-8B"
 
 load_hotpotqa_10_3_5 = partial(load_hotpotqa, num_docs=10, num_queries=3, num_samples=5)
 load_hotpotqa_200_1_128 = partial(load_hotpotqa, num_docs=200, num_queries=1, num_samples=128)
-
-_DATASET_LOADERS = {
-    'locomo': load_locomo,
-    'longmemeval': load_longmemeval, 
-    'hotpotqa': load_hotpotqa_200_1_128,
-    'msc': load_msc,
-    'memalpha': load_memalpha,
-    'trec_coarse': load_trec_coarse,
-    'trec_fine': load_trec_fine,
-    'banking77': load_banking77,
-    'clinic': load_clinic,
-    'nlu': load_nlu,
-    'booksum': load_booksum,
-    'perltqa': load_perltqa,
-    'pubmed_rct': load_pubmed_rct,
-    'squad': load_squad,
-    'infbench': load_infbench,
-    'convomem': load_convomem,
-}
+_DATASET_LOADERS = BENCHMARK_REGISTRY.copy()
+_DATASET_LOADERS['hotpotqa'] = load_hotpotqa_200_1_128
 
 class DatasetLoaders:
     def __getitem__(self, key):

@@ -1,10 +1,31 @@
-smolagents
-prettytable
-openai
-backoff
+# Core dependencies
+openai>=1.0.0
+asyncio
+tqdm
+uvloop
+
+# Data processing
 numpy
+pandas
 regex
+python-dotenv
+
+# Evaluation metrics
 nltk
-bert_score
 rouge-score
-sentence_transformers
+bert-score
+sentence-transformers
+
+# Utilities
+backoff
+prettytable
+pydantic
+datasets
+scipy
+
+# Optional dependencies
+matplotlib  # For plotting/statistics if needed
+
+# Note: The following are external dependencies that need separate installation:
+# - infinity_emb: Install from external/infinity/libs/infinity_emb/
+# - verl: Install from external/verl/

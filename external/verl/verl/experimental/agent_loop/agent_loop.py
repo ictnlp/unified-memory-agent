@@ -439,6 +439,14 @@ class AgentLoopWorker:
         if "agent_name" not in batch.non_tensor_batch:
             batch.non_tensor_batch["agent_name"] = np.array(["single_turn_agent"] * len(batch), dtype=object)
 
+        # Support overriding agent_name from config (for training flexibility)
+        # This allows using different agent loop implementations without modifying the dataset
+        agent_name_override = config.get("agent_name_override", None)
+        if agent_name_override:
+            original_agent_name = batch.non_tensor_batch["agent_name"][0] if len(batch) > 0 else "N/A"
+            logger.info(f"🔄 Overriding agent_name: {original_agent_name} -> {agent_name_override}")
+            batch.non_tensor_batch["agent_name"] = np.array([agent_name_override] * len(batch), dtype=object)
+
         if "index" in batch.non_tensor_batch:
             index = batch.non_tensor_batch["index"]
         else:

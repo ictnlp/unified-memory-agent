@@ -12,11 +12,11 @@ CONV_START_PROMPT = "Below is a conversation between {} and {}.\n\n"
 # On new machines, set MEMALPHA_DATA_DIR environment variable or copy data files
 MEMALPHA_PARQUET_PATH = os.getenv(
     "MEMALPHA_PARQUET_PATH",
-    "/mnt/pfs-guan-ssai/nlu/zhangkehao/Mem-alpha/data/memalpha/test.parquet"
+    "./data/raw/memalpha/test.parquet"
 )
 MEMORYAGENTBENCH_PARQUET_PATH = os.getenv(
     "MEMORYAGENTBENCH_PARQUET_PATH",
-    "/mnt/pfs-guan-ssai/nlu/zhangkehao/Mem-alpha/data/memoryagentbench/test.parquet"
+    "./data/raw/memoryagentbench/test.parquet"
 )
 
 BenchmarkRegistry = dict[str, Callable[..., list["EvalData"]]]
@@ -496,7 +496,7 @@ def load_hotpotqa(force_rebuild=False, num_docs: int=200, num_queries: int=1, nu
         return load_from_path(file_path)
     
     # Load source data
-    source_file = f"/mnt/pfs-guan-ssai/nlu/zhangkehao/MemAgent_minimal/data/taskutils/memory_data/eval_{num_docs}.json"
+    source_file = f"./data/raw/hotpotqa/eval_{num_docs}.json"
     if not os.path.exists(source_file):
         raise FileNotFoundError(f"Source file not found: {source_file}. Valid num_docs: 50, 100, 200, 400, 800, 1600, 3200, 6400, 12800, 25600, 51200")
     
@@ -846,7 +846,8 @@ def load_synth(suf, force_rebuild=False) -> list[EvalData]:
     if os.path.exists(f"data/processed_synth-{suf}.json") and not force_rebuild:
         return load_from_path(f"data/processed_synth-{suf}.json")
     from synthv1_async import main
-    main(num_sessions=int(''.join(filter(str.isdigit, suf))), out=f"data/processed_synth-{suf}.json", no_diversify=True)
+    num_questions = 7000 if "train" in suf else 100
+    main(num_sessions=int(''.join(filter(str.isdigit, suf))), out=f"data/processed_synth-{suf}.json", no_diversify=True, num_questions=num_questions)
     return load_from_path(f"data/processed_synth-{suf}.json")
 
 @register_benchmark()
@@ -866,7 +867,7 @@ def load_convomem(force_rebuild=False) -> list[EvalData]:
         return convomem_data
 
     from pathlib import Path
-    base_dir = Path("/mnt/pfs-guan-ssai/nlu/zhangkehao/ConvoMem/ConvoMem/core_benchmark/pre_mixed_testcases")
+    base_dir = Path("./data/raw/ConvoMem/core_benchmark/pre_mixed_testcases")
     json_files = sorted(p.as_posix() for p in base_dir.rglob("*.json"))
 
     print(f"Found {len(json_files)} JSON files")
@@ -951,30 +952,7 @@ print(f"[EvalDataset] Registered benchmarks: {', '.join(AVAILABLE_BENCHMARKS)}")
 # banking77, booksum, clinic, hotpotqa, locomo, longmemeval, memalpha, msc, nlu, perltqa, pubmed_rct, trec_coarse, trec_fine
 
 if __name__ == '__main__':
-    # for load_func in [load_trec_coarse, load_banking77, load_clinic, load_nlu, load_trec_fine]:
-    #     test_data = load_func(True)
-    #     if test_data:
-    #         sample = test_data[0]
-    #         print(f"Sample: {sample.task_id}, Questions: {len(sample.questions)}, Chunks: {len(sample.chunks)}")
-    #         if sample.questions:
-    #             print(f"Question: {sample.questions[0].query}")
-    #             print(f"Answer: {sample.questions[0].answer}")
-    #         if sample.chunks:
-    #             print(f"Chunk 0 preview: {sample.chunks[0][:200]}...")
-    # load_synth("s1", force_rebuild=True)
-    # load_synth("s3", force_rebuild=True)
-    # load_synth("s50", force_rebuild=True)
-    # load_infbench()
-    # load_synth(f"ss5", force_rebuild=True)
-    # for session_num in [2,3,4,10,20,30,40,50]:
-    #     load_synth(f"ss{session_num}", force_rebuild=True)
-    load_synth("ss100")
-    load_synth("ss500")
-    # load_synth("ss10", force_rebuild=True)
-    # load_trec_coarse(True)
-    # load_banking77(True)
-    # load_clinic(True)
-    # load_nlu(True)
-    # load_trec_fine(True)
-
-    # load_locomo(True)
+    load_synth("ss2")
+    load_synth("ss5")
+    load_synth("ss10")
+    load_synth("ss10_train")

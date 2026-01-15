@@ -39,7 +39,7 @@ def get_chunks(context_text, chunk_size):
 class RAGAgent(BaseAgent):
     """基于检索的简化记忆代理，支持embedding、bm25和混合检索(RRF)三种方式"""
 
-    def __init__(self, client: OpenAI, top_k: int = 20, model_name: str = "gpt4.1", retrieval_method: str = "embedding", rrf_k: int = 60):
+    def __init__(self, client: OpenAI, top_k: int = 20, model_name: str = "gpt4.1", retrieval_method: str = "hybrid", rrf_k: int = 60):
         super().__init__(client, model_name)
 
         self.embedding_model_name = 'sentence-transformers/all-MiniLM-L6-v2'

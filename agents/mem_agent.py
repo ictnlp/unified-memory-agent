@@ -234,7 +234,7 @@ Your answer:
         
         memory = "No previous memory"
         
-        for i, chunk in enumerate(processing_chunks):
+        for i, chunk in tqdm.tqdm(enumerate(processing_chunks), desc="Processing chunks"):
             try:
                 prompt_text = self.MEMORY_UPDATE_TEMPLATE.format(
                     prompt=query,

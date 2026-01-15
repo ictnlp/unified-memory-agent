@@ -17,7 +17,8 @@ from .single_turn_agent_loop import SingleTurnAgentLoop
 from .tool_agent_loop import ToolAgentLoop
 from .mem_agent_loop import MemoryAgentLoop
 from .tool_mem_agent_loop import ToolMemoryAgentLoop
+from .tool_mem_agent_loop_twostage import TwoStageMemoryAgentLoop
 
-_ = [SingleTurnAgentLoop, ToolAgentLoop, MemoryAgentLoop, ToolMemoryAgentLoop]
+_ = [SingleTurnAgentLoop, ToolAgentLoop, MemoryAgentLoop, ToolMemoryAgentLoop, TwoStageMemoryAgentLoop]
 
-__all__ = ["AgentLoopBase", "AgentLoopManager", "AsyncLLMServerManager", "ToolMemoryAgentLoop"]
+__all__ = ["AgentLoopBase", "AgentLoopManager", "AsyncLLMServerManager", "ToolMemoryAgentLoop", "TwoStageMemoryAgentLoop"]

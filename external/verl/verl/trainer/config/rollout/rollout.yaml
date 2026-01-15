@@ -280,3 +280,13 @@ profiler:
 
   # specific tool config
   tool_config: ${oc.select:actor_rollout_ref.actor.profiler.tool_config,null}
+
+# Two-stage training specific parameters for agent loop
+# Override the agent_name in the dataset to use a different agent loop implementation
+agent_name_override: null
+
+# Specify which training stage: "memory" or "qa"
+training_stage: null
+
+# Fixed model API endpoint for two-stage training (e.g., http://localhost:8000/v1)
+fixed_model_api: null

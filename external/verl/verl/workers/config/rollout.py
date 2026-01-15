@@ -174,3 +174,8 @@ class RolloutConfig(BaseConfig):
     limit_images: Optional[int] = None
 
     skip_tokenizer_init: bool = False
+
+    # Two-stage training specific parameters
+    agent_name_override: Optional[str] = None
+    training_stage: Optional[str] = None  # "memory" or "qa"
+    fixed_model_api: Optional[str] = None

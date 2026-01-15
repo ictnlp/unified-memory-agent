@@ -24,3 +24,33 @@ stats.txt
 check_*.py
 TODO
 nanobanana*
+tool_stats*
+analyze_tool_stats.py
+run_evaluation_full.sh
+run_generation.sh
+
+# Abandoned solutions
+agents/file_memory_agent/
+
+# Python cache and build files
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+
+# IDE specific
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Large data files
+*.jsonl
+*.txt
+!requirements.txt
+!README.md
+!CONTRIBUTING.md
+!LICENSE

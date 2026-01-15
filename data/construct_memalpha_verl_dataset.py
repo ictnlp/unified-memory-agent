@@ -9,9 +9,9 @@ print("Loading Memalpha dataset...")
 ds = load_dataset("YuWangX/Memalpha-full", split="train")
 print(f"Loaded {len(ds)} samples from Memalpha")
 
-# Filter out lme_train samples
-print("Filtering out lme_train samples...")
-ds = ds.filter(lambda x: x['data_source'] != 'lme_train')
+# Filter out lme_train and hotpotqa samples
+print("Filtering out lme_train and hotpotqa samples...")
+ds = ds.filter(lambda x: x['data_source'] != 'lme_train' and x['data_source'] != 'hotpotqa')
 print(f"After filtering: {len(ds)} samples remaining")
 
 # Prepare data structure
@@ -133,7 +133,7 @@ print(f"From {len(ds)} original Memalpha samples")
 
 # Save to parquet file
 df = pd.DataFrame(data)
-output_file = "/mnt/pfs-guan-ssai/nlu/zhangkehao/unified-memory-agent/data/memalphafull_train_verl.parquet"
+output_file = "./train/memalphafull-train/train.parquet"
 df.to_parquet(output_file, index=False)
 print(f"\nSaved to: {output_file}")
 

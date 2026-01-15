@@ -23,11 +23,8 @@ import tqdm
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 # Use uvloop for better async performance if available
-try:
-    import uvloop
-    asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
-except ImportError:
-    pass
+import uvloop
+asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 
 from config import DATASET_LOADERS, AGENT_CLASS, API_CONFIG_LOCAL, API_CONFIG_REMOTE
 
@@ -463,16 +460,18 @@ async def process_single_sample(sample, agent_class, agent_kwargs, output_file, 
             # Time the QA batch processing
             batch_start_time = time.time()
             if agent_class.__name__ == 'VerlMemoryAgent':
-                responses, intermediate_path = await agent.QA_batch_async(queries, save_intermediate=True)
+                responses, intermediate_path, tool_call_stats = await agent.QA_batch_async(queries, save_intermediate=True)
             else:
                 responses = await agent.QA_batch_async(queries)
+                intermediate_path = None
+                tool_call_stats = None
             batch_end_time = time.time()
             batch_duration = batch_end_time - batch_start_time
-            
+
             # Store results
             for i, (q, response) in enumerate(zip(questions_at_position, responses)):
                 per_question_time = batch_duration / len(questions_at_position)
-                
+
                 result = {
                     'qid': q.qid,
                     'query': q.query,
@@ -480,8 +479,11 @@ async def process_single_sample(sample, agent_class, agent_kwargs, output_file, 
                     'response': response,
                     'generation_time': per_question_time
                 }
-                if agent_class.__name__ == 'VerlMemoryAgent' and intermediate_path:
-                    result['intermediate_paths'] = str(intermediate_path)
+                if agent_class.__name__ == 'VerlMemoryAgent':
+                    if intermediate_path:
+                        result['intermediate_paths'] = str(intermediate_path)
+                    if tool_call_stats and i < len(tool_call_stats):
+                        result['tool_call_stats'] = tool_call_stats[i]
                 results.append(result)
         
         # Write all results to file at once (with file lock for thread safety)
@@ -631,6 +633,8 @@ async def evaluate_single_response(item, evaluator, results_file, semaphore, wri
             result['generation_time'] = item['generation_time']
         if 'intermediate_paths' in item:
             result['intermediate_paths'] = item['intermediate_paths']
+        if 'tool_call_stats' in item:
+            result['tool_call_stats'] = item['tool_call_stats']
 
         # Write result to file with shared async lock
         async with write_lock:
@@ -819,8 +823,8 @@ def get_args():
                         help='Input file for evaluation only (JSONL format)')
     parser.add_argument('--output_dir', type=str, default=None,
                         help='Output directory (default: results/{task})')
-    parser.add_argument('--concurrency', type=int, default=32,
-                        help='Number of concurrent tasks (default: 32)')
+    parser.add_argument('--concurrency', type=int, default=50,
+                        help='Number of concurrent tasks (default: 50)')
     parser.add_argument('--generate_only', action='store_true', help='Generate Only mode')
     parser.add_argument('--force-overwrite', action='store_true',
                         help='Re-evaluate all responses and overwrite existing evaluated files')

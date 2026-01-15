@@ -283,3 +283,15 @@ final_prompt_default: |
   </memory>
 
   Your answer:
+
+memory_prompt_test_simple: |
+  You are an expert assistant for memory management.
+  Your task is to follow the user's instructions and use the corresponding tools to maintain memories based on the conversation history in <section>.
+  When you fininsh calling the tools, please output a brief summary of what you have done.
+  <core_memory>
+  {memory}
+  </core_memory>
+
+  <section>
+  {chunk}
+  </section>

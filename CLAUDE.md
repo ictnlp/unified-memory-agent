@@ -48,9 +48,9 @@ python generate_stats.py --task all --save_txt
 
 ## API Configuration
 
-The system uses a custom OpenAI-compatible endpoint:
-- **Base URL**: `http://api-hub.inner.chj.cloud/llm-gateway/v1`
-- **Authentication**: Custom headers (X-CHJ-GWToken, X-CHJ-GW-SOURCE)
+The system uses OpenAI-compatible endpoints. Configure your API settings in the `.env` file:
+- **Base URL**: Set via `REMOTE_API_BASE` environment variable
+- **Authentication**: Custom headers (X-CHJ-GWToken, X-CHJ-GW-SOURCE) set via environment variables
 - **Models**: Azure GPT-4 variants via MODEL_NAME_MAP
 
 ## Dataset Structure

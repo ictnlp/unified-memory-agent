@@ -1,8 +1,0 @@
-The following log directories were excluded from this copy:
-- swanlog/ (221MB)
-- swanlog_lpai/ (1.1GB)
-- outputs/ (5MB)
-
-Original location: /mnt/pfs-guan-ssai/nlu/zhangkehao/verl/
-
-These directories contain training logs and outputs which are not needed for reproduction.

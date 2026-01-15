@@ -137,7 +137,7 @@ class TrajectoryConversation:
     """Represents a single conversation within a trajectory."""
 
     def __init__(self, prompt_ids: list[int], response_ids: list[int], response_mask: list[int],
-                 response_logprobs: list[float], is_final: int = 0, user_turns: int = 0, assistant_turns: int = 0, tool_rewards: list[float] = [], num_tools: int = 0):
+                 response_logprobs: list[float], is_final: int = 0, user_turns: int = 0, assistant_turns: int = 0, tool_rewards: list[float] = [], num_tools: int = 0, tool_counts: dict = None):
         self.prompt_ids = prompt_ids
         self.response_ids = response_ids
         self.response_mask = response_mask
@@ -147,6 +147,7 @@ class TrajectoryConversation:
         self.assistant_turns = assistant_turns
         self.tool_rewards = tool_rewards
         self.num_tools = num_tools
+        self.tool_counts = tool_counts or {}  # {tool_name: count, 'failed': failed_count}
 
 
 class AgentData:
@@ -186,6 +187,7 @@ class AgentData:
         self.user_turns = 0
         self.assistant_turns = 0
         self.current_tool_rewards: list[float] = []
+        self.current_tool_counts: dict[str, int] = {}  # Track tool usage: {tool_name: count, 'failed': failed_count}
     
     def add_conversation(self, is_final: int = 0):
         """Add a conversation to the trajectory using current accumulated state."""
@@ -202,9 +204,10 @@ class AgentData:
             assistant_turns=self.assistant_turns,
             tool_rewards=self.current_tool_rewards,
             num_tools=self.current_num_tools,
+            tool_counts=self.current_tool_counts.copy(),  # Copy tool counts to conversation
         )
         self.conversations.append(conversation)
-        
+
         # Reset current state for next conversation
         self.current_prompt_ids = []
         self.current_response_ids = []
@@ -214,6 +217,7 @@ class AgentData:
         self.assistant_turns = 0
         self.current_tool_rewards = []
         self.current_num_tools = 0
+        self.current_tool_counts = {}  # Reset tool counts
 
 def get_chunks(context_text, chunk_size):
     separator = "\n"
@@ -236,6 +240,9 @@ def get_chunks(context_text, chunk_size):
 
 @register("tool_mem_agent")
 class ToolMemoryAgentLoop(AgentLoopBase):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.server_manager_qa = kwargs.get("server_manager_qa")
     @classmethod
     def init_class(cls, config, tokenizer, processor, **kwargs):
         if cls._class_initialized:
@@ -339,8 +346,13 @@ class ToolMemoryAgentLoop(AgentLoopBase):
                 else None,
                 num_turns=conversation.user_turns + conversation.assistant_turns + 1,
                 metrics=agent_data.metrics,
-                extra_fields={'trajectory_id': trajectory_id, 'is_final': conversation.is_final, 'tool_rewards': conversation.tool_rewards, 
-                              'num_tools': conversation.num_tools},
+                extra_fields={
+                    'trajectory_id': trajectory_id,
+                    'is_final': conversation.is_final,
+                    'tool_rewards': conversation.tool_rewards,
+                    'num_tools': conversation.num_tools,
+                    'tool_counts': conversation.tool_counts,  # Add tool counts to extra_fields
+                },
             )
             outputs.append(output)
         
@@ -357,7 +369,7 @@ class ToolMemoryAgentLoop(AgentLoopBase):
         state = AgentState.GENERATING
         while state != AgentState.TERMINATED:
             if state == AgentState.GENERATING:
-                state = await self._handle_generating_state(agent_data, sampling_params)
+                state = await self._handle_generating_state(agent_data, sampling_params, phase="memory")
             elif state == AgentState.PROCESSING_TOOLS:
                 state = await self._handle_processing_tools_state(agent_data, trajectory_id)
             
@@ -390,7 +402,7 @@ class ToolMemoryAgentLoop(AgentLoopBase):
                 state = AgentState.GENERATING
                 while state != AgentState.TERMINATED:
                     if state == AgentState.GENERATING:
-                        state = await self._handle_generating_state(local_agent_data, sampling_params)
+                        state = await self._handle_generating_state(local_agent_data, sampling_params, phase="qa")
                     elif state == AgentState.PROCESSING_TOOLS:
                         state = await self._handle_processing_tools_state(local_agent_data, trajectory_id)
                     
@@ -413,7 +425,7 @@ class ToolMemoryAgentLoop(AgentLoopBase):
         for result_conversations in results_lists:
             agent_data.conversations.extend(result_conversations)
 
-    async def _handle_generating_state(self, agent_data: AgentData, sampling_params: dict[str, Any]) -> AgentState:
+    async def _handle_generating_state(self, agent_data: AgentData, sampling_params: dict[str, Any], phase: str) -> AgentState:
         """Handle the generating state: generate model response and check for tool calls."""
         max_model_len = self.prompt_length + self.response_length
         max_new_tokens = min(self.response_length, max_model_len - len(agent_data.current_prompt_ids) - 1)
@@ -421,11 +433,18 @@ class ToolMemoryAgentLoop(AgentLoopBase):
             print(f"ERROR: Current len(agent_data.current_prompt_ids)={len(agent_data.current_prompt_ids)} exceeds model max length {max_model_len}")
         with simple_timer("generate_sequences", agent_data.metrics):
             # 走的async_sglang_server.py
-            output = await self.server_manager.generate(
-                request_id=agent_data.request_id,
-                prompt_ids=agent_data.current_prompt_ids,
-                sampling_params=sampling_params,
-            )
+            if phase == "qa" and self.server_manager_qa is not None:
+                output = await self.server_manager_qa.generate(
+                    request_id=agent_data.request_id,
+                    prompt_ids=agent_data.current_prompt_ids,
+                    sampling_params=sampling_params,
+                )
+            else:
+                output = await self.server_manager.generate(
+                    request_id=agent_data.request_id,
+                    prompt_ids=agent_data.current_prompt_ids,
+                    sampling_params=sampling_params,
+                )
         response_ids = output.token_ids
         # Extract tool calls if tool parser is available
         agent_data.tool_calls = []
@@ -507,7 +526,7 @@ class ToolMemoryAgentLoop(AgentLoopBase):
         all_calls = []
         success_idx = 0
         failed_dict = {idx: msg for idx, msg in agent_data.failed_tool_calls}
-        
+
         # Merge successful and failed calls in original order
         total_calls = len(agent_data.tool_calls) + len(agent_data.failed_tool_calls)
         for i in range(total_calls):
@@ -517,31 +536,37 @@ class ToolMemoryAgentLoop(AgentLoopBase):
                 if success_idx < len(agent_data.tool_calls):
                     all_calls.append(('success', agent_data.tool_calls[success_idx]))
                     success_idx += 1
-        
+
         # Limit to max_parallel_calls
         all_calls = all_calls[:self.max_parallel_calls]
-        
+
         # Prepare tasks for parallel execution (only for successful calls)
         tasks = []
         for call_type, call_data in all_calls:
             if call_type == 'success':
                 tasks.append(self._call_tool(call_data, trajectory_id=trajectory_id))
-        
+
         # Execute all successful tools in parallel
         with simple_timer("tool_calls", agent_data.metrics):
             if tasks:
                 results = await asyncio.gather(*tasks)
             else:
                 results = []
-        
-        # Process responses in original order
+
+        # Process responses in original order and count tool usage
         add_messages: list[dict[str, Any]] = []
         result_idx = 0
         for call_type, call_data in all_calls:
             if call_type == 'failed':
+                # Count failed tool call
+                agent_data.current_tool_counts['failed'] = agent_data.current_tool_counts.get('failed', 0) + 1
                 message = {"role": "tool", "content": f"Error: {call_data}"}
                 add_messages.append(message)
             else:
+                # Count successful tool call by name
+                tool_name = call_data.name
+                agent_data.current_tool_counts[tool_name] = agent_data.current_tool_counts.get(tool_name, 0) + 1
+
                 tool_response, tool_reward, _ = results[result_idx]
                 message = {"role": "tool", "content": tool_response.text or ""}
                 add_messages.append(message)

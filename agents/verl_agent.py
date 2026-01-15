@@ -6,10 +6,10 @@ import sys
 from pathlib import Path
 from typing import Any, List, Optional, Sequence
 from uuid import uuid4
-
+from openai import OpenAI, AsyncOpenAI, RateLimitError
 from omegaconf import OmegaConf
 from transformers import AutoTokenizer
-
+import os
 from .base_agent import BaseAgent, MODEL_NAME_MAP
 
 # Path constants
@@ -121,6 +121,7 @@ class VerlMemoryAgent(BaseAgent):
         model_name: str = "gpt4.1",
         data_source: str | None = None,
         agent_id: Optional[str] = None,
+        qa_model_name: str = os.getenv("VERL_QA_MODEL_NAME"),
     ) -> None:
         if client is None:
             super().__init__(model_name=model_name)
@@ -138,6 +139,13 @@ class VerlMemoryAgent(BaseAgent):
         self.data_source = data_source
         self.agent_id = agent_id
         self.raw_chunks: List[str] = []
+        self.qa_model_name = qa_model_name
+        self.client_qa = None
+        if qa_model_name is not None:
+            self.client_qa = AsyncOpenAI(
+                base_url="http://localhost:8001/v1",
+                api_key="EMPTY",
+            )
 
     def _parse_longmemeval_chunk(self, content: str) -> List[str]:
         """解析LongMemEval格式的chunk为individual turns（严格按照原始实现）"""
@@ -237,6 +245,7 @@ class VerlMemoryAgent(BaseAgent):
             self._context_chunks.extend(subchunks)
         self.raw_chunks.append(chunk)
 
+
     async def QA_batch_async(self, query_list: List[str], save_intermediate: bool = True) -> List[str]:
         if not query_list:
             return []
@@ -278,6 +287,29 @@ class VerlMemoryAgent(BaseAgent):
                 return extracted.strip()
             return r[-2000:]  # return last 2000 chars as fallback
         results = [try_remove_boxed(r) for r in results]
+
+        # Extract tool call statistics from outputs
+        from collections import defaultdict
+        tool_call_stats = []
+
+        # Step 1: Aggregate memory stage statistics (is_final=0)
+        memory_tool_counts = defaultdict(int)
+        for output in outputs:
+            if output.extra_fields.get("is_final", 0) == 0:
+                tool_counts = output.extra_fields.get("tool_counts", {})
+                for tool_name, count in tool_counts.items():
+                    memory_tool_counts[tool_name] += count
+
+        # Step 2: Collect QA stage statistics (is_final>0) for each query
+        qa_outputs = [o for o in outputs if o.extra_fields.get("is_final", 0) > 0]
+        for output in qa_outputs:
+            qa_tool_counts = output.extra_fields.get("tool_counts", {})
+            stats = {
+                "memory_stage": dict(memory_tool_counts),
+                "qa_stage": dict(qa_tool_counts)
+            }
+            tool_call_stats.append(stats)
+
         intermediate_path = None
         if save_intermediate:
             intermediate_path = Path(f"./tmp/intermediate_verl_outputs/{self.data_source}/{self.agent_id}/{uuid4().hex}")
@@ -286,7 +318,7 @@ class VerlMemoryAgent(BaseAgent):
                 filename = f"final_{i}.txt" if output.extra_fields["is_final"] else f"memory_{i}.txt"
                 with open(intermediate_path / filename, "w") as f:
                     f.write(self._tokenizer.decode(output.prompt_ids + output.response_ids))
-        return results, intermediate_path
+        return results, intermediate_path, tool_call_stats
 
     async def _run_agent_loop(self, queries: Sequence[str]) -> List[str]:
         server_manager = ClientCompletionsServerManager(
@@ -294,9 +326,17 @@ class VerlMemoryAgent(BaseAgent):
             self._resolved_model,
             self._tokenizer,
         )
+        server_manager_qa = None
+        if self.client_qa is not None:
+            server_manager_qa = ClientCompletionsServerManager(
+                self.client_qa,
+                self.qa_model_name,
+                self._tokenizer,
+            )
         agent_loop = ToolMemoryAgentLoop(
             trainer_config=_DummyConfig(self._config),
             server_manager=server_manager,
+            server_manager_qa=server_manager_qa,
             tokenizer=self._tokenizer,
             processor=None,
         )

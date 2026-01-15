@@ -1,0 +1,90 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "unified-memory-agent"
+version = "0.1.0"
+description = "A comprehensive evaluation framework for memory-based conversational AI agents"
+readme = "README.md"
+license = {text = "Apache-2.0"}
+authors = [
+    {name = "Zhang Kehao", email = "your.email@example.com"},
+]
+maintainers = [
+    {name = "Zhang Kehao", email = "your.email@example.com"},
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+requires-python = ">=3.8"
+dependencies = [
+    "openai>=1.0.0",
+    "numpy",
+    "pandas",
+    "regex",
+    "python-dotenv",
+    "nltk",
+    "rouge-score",
+    "bert-score",
+    "sentence-transformers",
+    "backoff",
+    "prettytable",
+    "pydantic",
+    "datasets",
+    "scipy",
+    "uvloop",
+    "tqdm",
+]
+
+[project.optional-dependencies]
+all = [
+    "matplotlib",
+    "scikit-learn",
+]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio",
+    "black",
+    "isort",
+    "flake8",
+    "mypy",
+    "pre-commit",
+]
+jupyter = [
+    "jupyter",
+    "ipywidgets",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/yourusername/unified-memory-agent"
+"Bug Reports" = "https://github.com/yourusername/unified-memory-agent/issues"
+"Source" = "https://github.com/yourusername/unified-memory-agent"
+
+[project.scripts]
+uma-eval = "evaluate_async:main"
+
+[tool.setuptools.packages.find]
+include = [
+    "agents*",
+    "data*",
+]
+exclude = [
+    "external*",
+    "tests*",
+]
+
+[tool.setuptools.dynamic]
+version = {attr = "config.VERSION"}
