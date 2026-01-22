@@ -83,5 +83,3 @@ else
     sleep 3
     ray start --address=${LPAI_MASTER_0_HOST}:6379 --block
 fi
-
-# 在parquet数据里指定用哪个agent loop

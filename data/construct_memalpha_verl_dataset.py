@@ -3,10 +3,15 @@ import numpy as np
 import pandas as pd
 import random
 from datasets import load_dataset
+import argparse
+
+argparser = argparse.ArgumentParser()
+argparser.add_argument('--val', action='store_true', help='If set, process validation set instead of training set')
+args = argparser.parse_args()
 
 # Load Memalpha dataset
 print("Loading Memalpha dataset...")
-ds = load_dataset("YuWangX/Memalpha-full", split="train")
+ds = load_dataset("YuWangX/Memalpha-full", split="validation" if args.val else "train")
 print(f"Loaded {len(ds)} samples from Memalpha")
 
 # Filter out lme_train and hotpotqa samples
@@ -133,7 +138,13 @@ print(f"From {len(ds)} original Memalpha samples")
 
 # Save to parquet file
 df = pd.DataFrame(data)
-output_file = "./train/memalphafull-train/train.parquet"
+output_file = f"./train/memalphafull-train/{'validation' if args.val else 'train'}.parquet"
+if args.val:
+    df = (
+        df.groupby("data_source", group_keys=False)
+        .apply(lambda group: group.sample(n=20, random_state=42) if len(group) >= 20 else group)
+        .reset_index(drop=True)
+    )
 df.to_parquet(output_file, index=False)
 print(f"\nSaved to: {output_file}")
 

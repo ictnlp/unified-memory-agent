@@ -51,8 +51,8 @@ python3 -m verl.trainer.main_ppo \
     algorithm.norm_adv_by_std_in_grpo=True \
     trainer.critic_warmup=0 \
     trainer.logger='["console","swanlab"]' \
-    trainer.project_name='tool_memagent' \
-    trainer.experiment_name='qwen3-4b_GRPOv4' \
+    trainer.project_name='my-project' \
+    trainer.experiment_name='my-experiment' \
     trainer.n_gpus_per_node=8 \
     trainer.nnodes=1 \
     trainer.save_freq=20 \
@@ -62,9 +62,9 @@ python3 -m verl.trainer.main_ppo \
     data.train_files="['../../data/train/hotpotqa-uma/train.parquet', \
                         '../../data/train/ledger-qa-train/train.parquet', \
                         '../../data/train/memalphafull-train/train.parquet']" \
-    data.val_files="['/mnt/pfs-guan-ssai/nlu/zhangkehao/MemAgent_minimal/taskutils/memory_data/hotpotqa_dev_mem_agent_loop_chunk2000.parquet', \
-                        '/mnt/pfs-guan-ssai/nlu/zhangkehao/unified-memory-agent/data/memalpha_dev_verl_small.parquet']" \
-    custom_reward_function.path=/mnt/pfs-guan-ssai/nlu/zhangkehao/unified-memory-agent/external/verl/memagent/hotpotqa.py \
+    data.val_files="['../../data/train/ledger-qa-train/dev.parquet', \
+                        '../../data/train/memalphafull-train/dev.parquet']" \
+    custom_reward_function.path=./memagent/hotpotqa.py \
     custom_reward_function.name=reward_func $@
 
 # 在parquet数据里指定用哪个agent loop

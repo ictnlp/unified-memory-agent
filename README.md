@@ -147,8 +147,8 @@ bash run_score.sh
 ```bash
 cd data
 python construct_memalpha_verl_dataset.py
+python construct_memalpha_verl_dataset.py --val
 ```
-Get training set `memalphafull_train_verl.parquet`.
 
 2. hotpotqa
 Follow [Memagent](https://github.com/BytedTsinghua-SIA/MemAgent), we construct a hotpotqa containing 8192 items. We further chunk the context of each item for retrieving. You can download the processed data by
@@ -189,20 +189,26 @@ done
 ```
 
 ### Start Training
-
+Single node
 ```bash
 source .venv/bin/activate
 cd external/verl
 bash run_1node.sh
 ```
 
+4 nodes
+```bash
+source .venv/bin/activate
+cd external/verl
+bash run_4nodes.sh
+```
 ## Extending the System
 
 ### Adding New Agents
 
 1. Create new agent class inheriting from `BaseAgent`
 2. Implement required methods: `add_memory_async()` and `QA_batch_async()`
-3. Add to agent factory in `evaluate.py`
+3. Add to agent factory in `evaluate_async.py`
 
 Example:
 ```python
