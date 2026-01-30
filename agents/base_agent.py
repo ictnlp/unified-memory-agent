@@ -21,7 +21,7 @@ class BaseAgent:
     ):
         self.client = client
         self.model_name = model_name
-    
+
     def _handle_api_error(self, error: Exception, query: str = "") -> str:
         """Handle API errors and return appropriate error messages"""
         if isinstance(error, BadRequestError):
@@ -34,17 +34,11 @@ class BaseAgent:
                 return f"ERROR_BAD_REQUEST: {error_details}"
         else:
             return f"ERROR_API_CALL: {str(error)}"
-    
-    def add_memory(
-        self,
-        chunk: str
-    ):
+
+    async def add_memory_async(self, chunk: str) -> None:
         raise NotImplementedError
 
-    def QA(
-        self,
-        query: str
-    ) -> str:
+    async def QA_batch_async(self, query_list: List[str], save_intermediate: bool = True) -> List[str]:
         raise NotImplementedError
 
     def reset(self) -> None:

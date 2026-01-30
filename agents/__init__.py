@@ -9,10 +9,12 @@ EXTERNAL_PATH = Path(__file__).parents[1] / "external"
 if EXTERNAL_PATH.exists():
     # Add paths for external dependencies
     external_paths = [
-        EXTERNAL_PATH,  # For 'from gam import ...'
+        EXTERNAL_PATH,  # For 'from gam import ...', 'from rlm.rlm_repl import ...'
         EXTERNAL_PATH / "memalpha",  # For 'from agent import ...', 'from memory import ...'
         EXTERNAL_PATH / "mem1",  # For 'from inference.data_pipelines import ...'
         EXTERNAL_PATH / "verl",  # For 'from verl.experimental... import ...'
+        EXTERNAL_PATH / "A-mem-sys",  # For 'from agentic_memory import ...'
+        # rlm is accessed via rlm.rlm_repl, so EXTERNAL_PATH is sufficient
     ]
 
     for path in external_paths:

@@ -234,12 +234,12 @@ class Mem1Agent(BaseAgent):
                 # Clean up response
                 answer = answer.strip()
                 if answer.startswith("Error:"):
-                    answer = f"ERROR_MEM1_QA: {answer}"
+                    answer = self._handle_api_error(Exception(answer), query)
                 # Handle thinking tags if present in answer
                 elif "</think>" in answer:
                     answer = answer.split("</think>")[-1].strip()
                 elif "<think>" in answer and "</think>" not in answer:
-                    answer = f"ERROR_THINK_LENGTH_EXCEEDED: The think is too long. Think: {answer[:100]}..."
+                    answer = self._handle_api_error(Exception("Think length exceeded"), query)
 
                 # Extract answer from tags if present
                 if "<answer>" in answer and "</answer>" in answer:

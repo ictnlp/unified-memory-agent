@@ -133,7 +133,7 @@ class MemAlphaUnifiedAgent:
             try:
                 answer = await self._agent.chat(user_msg=formatted_query, status="chat")
             except Exception as exc:  # pragma: no cover - runtime dependent
-                answer = f"ERROR_MEM_ALPHA_QA: {exc}"
+                answer = self._handle_api_error(exc, query)
 
             if isinstance(answer, tuple):  # chat may return (content, step_info)
                 answer = answer[0]

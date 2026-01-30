@@ -66,10 +66,12 @@ class AgentRegistry:
         'filememory': ('agents.file_memory_agent', 'FileMemoryAgent'),
         'emergence': ('agents.emergence_agent', 'EmergenceAgent'),
         'rag': ('agents.rag_agent', 'RAGAgent'),
-        'memalpha': ('agents.mem_alpha_agent', 'MemAlphaUnifiedAgent'),
+        'memalpha': ('agents.memalpha_agent', 'MemAlphaUnifiedAgent'),
         'toolmem': ('agents.verl_agent', 'VerlMemoryAgent'),
         'mem1': ('agents.mem1_agent', 'Mem1Agent'),
         'gam': ('agents.gam_agent', 'GAMAgent'),
+        'rlm': ('agents.rlm_agent', 'RLMAgent'),
+        'amem': ('agents.amem_agent', 'AmemAgent'),
     }
 
     def __init__(self) -> None:

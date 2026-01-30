@@ -1,7 +1,7 @@
-# import debugpy
-# debugpy.listen(("0.0.0.0", 5678))  # 监听所有 IP，端口可改 
-# print("  Waiting for debugger attach on port 5678...") 
-# debugpy.wait_for_client()  # 等待调试器连接
+import debugpy
+debugpy.listen(("0.0.0.0", 5678))  # 监听所有 IP，端口可改 
+print("  Waiting for debugger attach on port 5678...") 
+debugpy.wait_for_client()  # 等待调试器连接
 from openai import OpenAI, AsyncOpenAI, RateLimitError
 import tqdm
 import uuid
@@ -410,6 +410,10 @@ def create_client():
     """Create AsyncOpenAI client for async operations"""
     return AsyncOpenAI(**API_CONFIG_LOCAL)
 
+def create_sync_client():
+    """Create OpenAI client for sync operations"""
+    return OpenAI(**API_CONFIG_LOCAL)
+
 def create_judge_client():
     """Create AsyncOpenAI client for judging"""
     return AsyncOpenAI(**API_CONFIG_LOCAL)
@@ -459,12 +463,14 @@ async def process_single_sample(sample, agent_class, agent_kwargs, output_file, 
 
             # Time the QA batch processing
             batch_start_time = time.time()
+            intermediate_path = None
+            tool_call_stats = None
             if agent_class.__name__ == 'VerlMemoryAgent':
                 responses, intermediate_path, tool_call_stats = await agent.QA_batch_async(queries, save_intermediate=True)
+            elif agent_class.__name__ == 'RLMAgent':
+                responses, intermediate_path = await agent.QA_batch_async(queries, save_intermediate=True)
             else:
                 responses = await agent.QA_batch_async(queries)
-                intermediate_path = None
-                tool_call_stats = None
             batch_end_time = time.time()
             batch_duration = batch_end_time - batch_start_time
 
@@ -479,11 +485,13 @@ async def process_single_sample(sample, agent_class, agent_kwargs, output_file, 
                     'response': response,
                     'generation_time': per_question_time
                 }
-                if agent_class.__name__ == 'VerlMemoryAgent':
-                    if intermediate_path:
+                if intermediate_path:
+                    if isinstance(intermediate_path, list):
+                        result['intermediate_paths'] = str(intermediate_path[i])
+                    else:
                         result['intermediate_paths'] = str(intermediate_path)
-                    if tool_call_stats and i < len(tool_call_stats):
-                        result['tool_call_stats'] = tool_call_stats[i]
+                if tool_call_stats and i < len(tool_call_stats):
+                    result['tool_call_stats'] = tool_call_stats[i]
                 results.append(result)
         
         # Write all results to file at once (with file lock for thread safety)
@@ -555,7 +563,10 @@ async def generate_responses_async(task, agent_class, agent_config, agent_id, ou
     write_lock = asyncio.Lock()
     
     # Create agent instances for concurrent processing
-    client = create_client()
+    if agent_class.__name__ == 'RLMAgent':
+        client = create_sync_client()
+    else:
+        client = create_client()
     
     # Create tasks for all samples
     tasks = []

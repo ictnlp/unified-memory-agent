@@ -52,7 +52,7 @@ class ConcatAgent(BaseAgent):
                 messages=[
                     {"role": "user", "content": prompt}
                 ],
-                max_tokens=1024,
+                max_tokens=8192,
                 temperature=0.7
             )
             res = response.choices[0].message.content
@@ -60,7 +60,7 @@ class ConcatAgent(BaseAgent):
                 res = res.split("</think>")[-1].strip()
                 return res
             elif "<think>" in res:
-                return f"ERROR_THINK_LENGTH_EXCEEDED: The think is too long for the model to process. Think: {res[:100]}..."
+                raise Exception(f"ERROR_THINK_LENGTH_EXCEEDED: The think is too long for the model to process. Think: {res[:100]}...")
             return res.strip()
         except Exception as e:
             return self._handle_api_error(e, query)
@@ -111,7 +111,7 @@ class ConcatAgent(BaseAgent):
                         messages=[
                             {"role": "user", "content": prompt}
                         ],
-                        max_tokens=1024 * len(query_batch),
+                        max_tokens=8192,
                         temperature=0.7
                     )
                     response_str = response.choices[0].message.content
@@ -140,7 +140,7 @@ class ConcatAgent(BaseAgent):
                 # All retries failed, add error messages for this batch
                 print(f"Batch {batch_idx//batch_size + 1} failed after {retries} retries, adding error responses")
                 for _ in range(len(query_batch)):
-                    res.append(f"ERROR_BATCH_FAILED: Failed to get response after {retries} retries")
+                    res.append(self._handle_api_error(Exception(f"Failed to get response after {retries} retries"), "Batch queries"))
             else:
                 # Use local index i (0, 1, 2, ...) for each batch
                 for i in range(len(query_batch)):
@@ -149,6 +149,6 @@ class ConcatAgent(BaseAgent):
                             res.append(str(reformat_response[str(i)]).replace('(a)', '').replace('(b)', '').strip())
                         except:
                             res.append(', '.join([str(n) for n in list(reformat_response[str(i)].values())]))
-                    except:
-                        res.append("ERROR_PARSING: Failed to parse response")
+                    except Exception as e:
+                        res.append(self._handle_api_error(e, f"Parse batch response for query {i}"))
         return res

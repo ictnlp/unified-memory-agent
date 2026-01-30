@@ -952,7 +952,8 @@ print(f"[EvalDataset] Registered benchmarks: {', '.join(AVAILABLE_BENCHMARKS)}")
 # banking77, booksum, clinic, hotpotqa, locomo, longmemeval, memalpha, msc, nlu, perltqa, pubmed_rct, trec_coarse, trec_fine
 
 if __name__ == '__main__':
-    load_synth("ss2")
-    load_synth("ss5")
-    load_synth("ss10")
-    load_synth("ss10_train")
+    # load_synth("ss2")
+    # load_synth("ss5")
+    # load_synth("ss10")
+    # load_synth("ss10_train")
+    load_longmemeval()
