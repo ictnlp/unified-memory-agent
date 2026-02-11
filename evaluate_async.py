@@ -1,7 +1,7 @@
-import debugpy
-debugpy.listen(("0.0.0.0", 5678))  # 监听所有 IP，端口可改 
-print("  Waiting for debugger attach on port 5678...") 
-debugpy.wait_for_client()  # 等待调试器连接
+# import debugpy
+# debugpy.listen(("0.0.0.0", 5678))  # 监听所有 IP，端口可改 
+# print("  Waiting for debugger attach on port 5678...") 
+# debugpy.wait_for_client()  # 等待调试器连接
 from openai import OpenAI, AsyncOpenAI, RateLimitError
 import tqdm
 import uuid
@@ -324,8 +324,7 @@ class LongmemEvalEvaluator(BaseEvaluator):
     }
 
     def __init__(self, scoring_client: OpenAI):
-        super().__init__()
-        self.scoring_client = scoring_client
+        super().__init__(scoring_client)
 
     def _get_template_for_qid(self, qid: str) -> str:
         """Get appropriate template based on qid and question type"""
@@ -397,10 +396,72 @@ class KeywordMatchEvaluator(BaseEvaluator):
 
         return metrics
 
+class KnowMeBenchEvaluator(BaseEvaluator):
+    """Evaluator for KnowMeBench using run_eval.py for LLM scoring"""
+
+    def __init__(self, scoring_client: OpenAI = None):
+        super().__init__(scoring_client)
+
+        # Import and store reference to run_eval module
+        import sys
+        eval_dir = Path("data/raw/KnowMeBench/evaluate")
+        if str(eval_dir) not in sys.path:
+            sys.path.insert(0, str(eval_dir))
+
+        from run_eval import run
+        self.run_eval = run
+
+    async def _llm_metric(self, qid: str, query: str, expected_text: str, response_text: str,
+                          *, template: Optional[str] = None) -> Optional[float]:
+        """
+        Run LLM-based grading using KnowMeBench's run_eval.py
+
+        This calls run_eval.run() with input data directly (no temp files needed).
+        """
+        if not self.scoring_client:
+            return None
+
+        try:
+            # Extract task_type from category mapping (set by set_category_mapping)
+            task_type = self.qid_category_map.get(qid, "Unknown")
+
+            # Create input data in run_eval.py format
+            input_data = [{
+                "id": qid,
+                "task_type": task_type,
+                "question": query,
+                "reference_answer": expected_text,
+                "model_answer": response_text
+            }]
+
+            # Run evaluation in thread pool (it's sync but uses asyncio internally)
+            results = await asyncio.to_thread(
+                self.run_eval,
+                input_data=input_data,
+                judge_model=JUDGE_MODEL_NAME,
+                scoring_client=self.scoring_client
+            )
+
+            # Extract score (normalize to 0-1 range, KnowMeBench uses 0-5)
+            details = results.get("details", [])
+            if details and len(details) > 0:
+                score = details[0].get("score", 0)
+                # Normalize from 0-5 to 0-1
+                normalized_score = score / 5.0 if isinstance(score, (int, float)) else 0.0
+                return normalized_score
+            else:
+                return 0.0
+
+        except Exception as exc:
+            print(f"Error in KnowMeBench LLM scoring for qid {qid}: {exc}")
+            return -1.0
+
 def get_evaluator(task: str, scoring_client: OpenAI|None = None) -> BaseEvaluator:
     """Factory function to get appropriate evaluator for task"""
     if task == 'longmemeval':
         return LongmemEvalEvaluator(scoring_client)
+    elif task == 'knowmebench':
+        return KnowMeBenchEvaluator(scoring_client)
     elif task in ['booksum', 'infbench']:
         return KeywordMatchEvaluator(scoring_client)
     else:

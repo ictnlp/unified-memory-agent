@@ -68,20 +68,20 @@ done
 # done
 
 # vllm serve BytedTsinghua-SIA/RL-MemoryAgent-14B -tp 8 --gpu-memory-utilization 0.8 --rope-scaling '{"rope_type":"yarn","factor":4.0,"original_max_position_embeddings":32768}' --max-model-len 131072
-for AGENT in memagent
-do
-    for TASK in synth-ss2 synth-ss5 synth-ss10 synth-ss20 synth-ss30 synth-ss40 synth-ss50 banking77 booksum clinic hotpotqa locomo longmemeval msc nlu perltqa pubmed_rct trec_coarse trec_fine squad infbench convomem
-    do
-        python evaluate_async.py \
-            --task $TASK \
-            --agent $AGENT \
-            --agent_id memagent14b \
-            --concurrency 10 \
-            --output_dir results/qwen3-4b/$TASK \
-            --model BytedTsinghua-SIA/RL-MemoryAgent-14B \
-            --generate_only
-    done
-done
+# for AGENT in memagent
+# do
+#     for TASK in synth-ss2 synth-ss5 synth-ss10 synth-ss20 synth-ss30 synth-ss40 synth-ss50 banking77 booksum clinic hotpotqa locomo longmemeval msc nlu perltqa pubmed_rct trec_coarse trec_fine squad infbench convomem
+#     do
+#         python evaluate_async.py \
+#             --task $TASK \
+#             --agent $AGENT \
+#             --agent_id memagent14b \
+#             --concurrency 10 \
+#             --output_dir results/qwen3-4b/$TASK \
+#             --model BytedTsinghua-SIA/RL-MemoryAgent-14B \
+#             --generate_only
+#     done
+# done
 
 # CUDA_VISIBLE_DEVICES=4,5,6,7 vllm serve Qwen/Qwen3-4B-Instruct-2507 -tp 4 --max-model-len 262144 --port 8001 > vllm1.log 2>&1 &
 # CUDA_VISIBLE_DEVICES=0,1,2,3 vllm serve YuWangX/Memalpha-4B -tp 4 --rope-scaling '{"rope_type":"yarn","factor":4.0,"original_max_position_embeddings":32768}' --max-model-len 131072 > vllm0.log 2>&1 &
@@ -110,3 +110,18 @@ done
 #         --output_dir results/qwen3-4b/$TASK \
 #         --generate_only
 # done
+
+# CUDA_VISIBLE_DEVICES=0,1,2,3 vllm serve /mnt/pfs-guan-ssai/nlu/zhangkehao/unified-memory-agent/external/verl/checkpoints/tool_memagent/qwen3-4b_stage1_memory/global_step_63/hf -tp 4 > vllm0.log 2>&1 &
+# CUDA_VISIBLE_DEVICES=4,5,6,7 vllm serve /mnt/pfs-guan-ssai/nlu/zhangkehao/unified-memory-agent/external/verl/checkpoints/tool_memagent/qwen3-4b_stage2_qa/global_step_63/hf -tp 4 --port 8001 > vllm1.log 2>&1 &
+export VERL_QA_MODEL_NAME="/mnt/pfs-guan-ssai/nlu/zhangkehao/unified-memory-agent/external/verl/checkpoints/tool_memagent/qwen3-4b_stage2_qa/global_step_63/hf"
+for TASK in longmemeval msc nlu perltqa pubmed_rct trec_coarse trec_fine squad infbench convomem
+do
+    python evaluate_async.py \
+        --task $TASK \
+        --agent toolmem \
+        --agent_id toolmem2stage \
+        --model /mnt/pfs-guan-ssai/nlu/zhangkehao/unified-memory-agent/external/verl/checkpoints/tool_memagent/qwen3-4b_stage1_memory/global_step_63/hf \
+        --concurrency 10 \
+        --output_dir results/qwen3-4b/$TASK \
+        --generate_only
+done

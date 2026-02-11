@@ -497,10 +497,10 @@ def plot_session_scaling(summary_scores: Dict[str, Dict[str, float]],
     plt.grid(True, alpha=0.3, linestyle='--')
     plt.tight_layout()
 
-    # Save plot
+    # Save plot as vector graphics (PDF)
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    output_file = os.path.join(results_dir, f"synth_session_scaling_{timestamp}.png")
-    plt.savefig(output_file, dpi=300, bbox_inches='tight')
+    output_file = os.path.join(results_dir, f"synth_session_scaling_{timestamp}.pdf")
+    plt.savefig(output_file, format='pdf', bbox_inches='tight')
     print(f"\nSession scaling plot saved to: {output_file}")
     plt.close()
 

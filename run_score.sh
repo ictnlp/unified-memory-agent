@@ -1,12 +1,13 @@
-CUDA_VISIBLE_DEVICES=4,5,6,7 vllm serve Qwen/Qwen3-30B-A3B-Instruct-2507 -tp 4 --max-model-len 262144 --gpu-memory-utilization 0.8 > vllm.log 2>&1 &
+# CUDA_VISIBLE_DEVICES=4,5,6,7 vllm serve Qwen/Qwen3-30B-A3B-Instruct-2507 -tp 4 --max-model-len 262144 --gpu-memory-utilization 0.8 > vllm.log 2>&1 &
 until curl -s http://localhost:8000/health > /dev/null 2>&1; do
     sleep 2
     echo "wait for server port 8000..."
 done
 
-AGENTS="concat rag memagent memagent_woq memalpha mem1"
-TASKS="synth-ss2 synth-ss5"
-RESULTS_DIR="results"
+AGENTS="concat"
+# TASKS="longmemeval locomo hotpotqa synth-ss2 synth-ss5 synth-ss10 synth-ss20 synth-ss30 synth-ss40 synth-ss50 banking77 booksum clinic msc nlu perltqa pubmed_rct trec_coarse trec_fine squad infbench convomem"
+TASKS="knowmebench"
+RESULTS_DIR="results/qwen3-4b"
 
 export CUDA_VISIBLE_DEVICES=0,1,2,3
 for AGENT in $AGENTS

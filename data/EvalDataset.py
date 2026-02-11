@@ -1,22 +1,54 @@
 import json
 import os
+from pathlib import Path
 from typing import Callable
 from pydantic import BaseModel
 import random
 import pandas as pd
+import urllib.request
 
 CONV_START_PROMPT = "Below is a conversation between {} and {}.\n\n"
+
+
+def _download_file(url: str, dest_path: str):
+    """Download a file from URL to destination path."""
+    os.makedirs(os.path.dirname(dest_path) or '.', exist_ok=True)
+    print(f"[Download] Downloading from {url}...")
+    urllib.request.urlretrieve(url, dest_path)
+    print(f"[Download] Saved to {dest_path}")
+
+
+def _download_hf_repo(repo_id: str, subfolder: str = None, local_dir: str = None):
+    """Download a HuggingFace repository or subfolder."""
+    try:
+        from huggingface_hub import snapshot_download
+        print(f"[Download] Downloading from HuggingFace: {repo_id}{f'/{subfolder}' if subfolder else ''}...")
+        downloaded_path = snapshot_download(
+            repo_id=repo_id,
+            repo_type="dataset",
+            subfolder=subfolder,
+            local_dir=local_dir,
+            local_dir_use_symlinks=False,
+            endpoint="https://hf-mirror.com"
+        )
+        print(f"[Download] Saved to: {downloaded_path}")
+        return downloaded_path
+    except ImportError:
+        raise ImportError(
+            "huggingface_hub is required to download ConvoMem data. "
+            "Install it with: pip install huggingface_hub"
+        )
 
 # Data paths - can be overridden by environment variables
 # Default paths point to original Mem-alpha data location
 # On new machines, set MEMALPHA_DATA_DIR environment variable or copy data files
 MEMALPHA_PARQUET_PATH = os.getenv(
     "MEMALPHA_PARQUET_PATH",
-    "./data/raw/memalpha/test.parquet"
+    "data/raw/memalpha/test.parquet"
 )
 MEMORYAGENTBENCH_PARQUET_PATH = os.getenv(
     "MEMORYAGENTBENCH_PARQUET_PATH",
-    "./data/raw/memoryagentbench/test.parquet"
+    "data/raw/memoryagentbench/test.parquet"
 )
 
 BenchmarkRegistry = dict[str, Callable[..., list["EvalData"]]]
@@ -282,73 +314,87 @@ def load_locomo(force_rebuild=False):
 
 @register_benchmark()
 def load_longmemeval(force_rebuild=False, oracle=False):
+    """
+    Load LongMemEval benchmark from original format (longmemeval_s1.json).
+
+    Each question creates one EvalData with all haystack sessions as chunks.
+    Questions are asked at the final position (after all sessions).
+    """
     file_path = "data/processed_longmemeval_oracle.json" if oracle else "data/processed_longmemeval.json"
     if os.path.exists(file_path) and not force_rebuild:
         return load_from_path(file_path)
-    
-    raw = json.load(open("data/raw/longmemeval_s.json"))
+
+    # Check if original longmemeval_s.json exists, download if not
+    raw_data_path = "data/raw/longmemeval_s.json" if not oracle else "data/raw/longmemeval_oracle.json"
+    if not os.path.exists(raw_data_path):
+        download_url = "https://hf-mirror.com/datasets/xiaowu0162/longmemeval/resolve/main/longmemeval_s" if not oracle else "https://hf-mirror.com/datasets/xiaowu0162/longmemeval/resolve/main/longmemeval_oracle"
+        _download_file(download_url, raw_data_path)
+
+    with open(raw_data_path, 'r') as f:
+        raw = json.load(f)
     processed = []
-    
+
     for item in raw:
-        task_id = item['task_id']
-        questions = []
-        
-        # Process questions
-        for idx, q_data in enumerate(item['questions']):
-            # Add question time to the question text
-            question_text = f"[{q_data['question_time']}] {q_data['question']}"
-            
-            # Find position based on has_answer evidence
-            position = 0  # Default to asking at the beginning
-            
-            # Find the last session that contains evidence (has_answer=True)
-            for session_idx, session in enumerate(item['sessions']):
-                for turn in session:
-                    if turn.get('has_answer', False):
-                        position = session_idx
-            
-            # position = random.randint(position + 1, len(item['sessions'])) # 随机选择最后一个证据到最后一个turn之间的某个位置
-            position = len(item['sessions']) #选择最后一个位置提问
-            
-            questions.append(Question(
-                qid=f"longmemeval_{task_id}_{idx}",
-                query=question_text,
-                answer=str(q_data['correct_answer']),
-                position=position - 1,  # Convert to 0-based index
-                category=q_data['question_type']  # Add question_type as category
-            ))
-        
-        # Process sessions into chunks
+        question_id = item.get('question_id')
+        question_type = item.get('question_type')
+        question_text = item.get('question')
+        answer = item.get('answer')
+        question_date = item.get('question_date')
+
+        # Get haystack sessions (conversations)
+        haystack_sessions = item.get('haystack_sessions', [])
+        haystack_dates = item.get('haystack_dates', [])
+
+        # Convert sessions to chunks
         chunks = []
         start_prompt = CONV_START_PROMPT.format("user", "assistant")
-        
-        for session_idx, session in enumerate(item['sessions']):
-            if not session:  # Skip empty sessions
+
+        for session_idx, session in enumerate(haystack_sessions):
+            if not session:
                 continue
-                
-            # Get date from first turn in session (all turns in same session have same date)
-            session_date = session[0]['date']
+
+            # Get date for this session
+            session_date = haystack_dates[session_idx] if session_idx < len(haystack_dates) else "Unknown"
             session_conv = ''
-            
+
             for turn in session:
-                if oracle and not turn.get('has_answer', False):
-                    continue
-                role = "User" if turn['role'] == 'user' else "Assistant"
-                turn_text = f'{role} said, "{turn["content"]}"'
-                turn_text += '\n'
+                role = turn.get('role', '')
+                content = turn.get('content', '')
+                # Format like: "User said, "..."" or "Assistant said, "...""
+                turn_role = "User" if role == 'user' else "Assistant"
+                turn_text = f'{turn_role} said, "{content}"\n'
                 session_conv += turn_text
+
             if not session_conv:
                 session_conv = "NO CONVERSATION"
+
             query_conv = f'DATE: {session_date}\nCONVERSATION:\n{session_conv}\n\n'
             chunks.append(start_prompt + query_conv)
-        
+
+        # Create question object - ask at the end (after all sessions)
+        position = len(chunks) - 1
+
+        # Add question_time prefix to question text
+        full_question_text = f"[{question_date}] {question_text}"
+
+        question = Question(
+            qid=f"longmemeval_{question_id}",
+            query=full_question_text,
+            answer=str(answer),
+            position=position,
+            category=question_type
+        )
+
+        # Create EvalData
         evaldata = EvalData(
-            task_id=f"longmemeval_{task_id}", 
-            questions=questions, 
+            task_id=f"longmemeval_{question_id}",
+            questions=[question],
             chunks=chunks
         )
         processed.append(evaldata)
-    
+
+    print(f"[LongMemEval] Loaded {len(processed)} samples from original format")
+
     # Save processed data
     json.dump([item.model_dump() for item in processed], open(file_path, "w"), indent=4, ensure_ascii=False)
     return processed
@@ -487,18 +533,15 @@ def load_hotpotqa(force_rebuild=False, num_docs: int=200, num_queries: int=1, nu
         num_queries: Number of queries per sample (fixed at 1 for this format)
         num_samples: Number of samples (fixed at 128 for this format)
     """
-    # Fixed values
-    num_queries = 1
-    num_samples = 128
-    
     file_path = f"data/processed_hotpotqa_{num_docs}.json"
     if os.path.exists(file_path) and not force_rebuild:
         return load_from_path(file_path)
     
     # Load source data
-    source_file = f"./data/raw/hotpotqa/eval_{num_docs}.json"
+    source_file = f"data/raw/hotpotqa/eval_{num_docs}.json"
     if not os.path.exists(source_file):
-        raise FileNotFoundError(f"Source file not found: {source_file}. Valid num_docs: 50, 100, 200, 400, 800, 1600, 3200, 6400, 12800, 25600, 51200")
+        download_url = f"https://hf-mirror.com/datasets/BytedTsinghua-SIA/hotpotqa/blob/main/eval_{num_docs}.json"
+        _download_file(download_url, source_file)
     
     raw = json.load(open(source_file))
     processed = []
@@ -866,8 +909,16 @@ def load_convomem(force_rebuild=False) -> list[EvalData]:
         convomem_data = [item for item in convomem_data if item.questions]
         return convomem_data
 
-    from pathlib import Path
-    base_dir = Path("./data/raw/ConvoMem/core_benchmark/pre_mixed_testcases")
+    # Check if ConvoMem data exists, download if not
+    base_dir = Path("data/raw/ConvoMem/core_benchmark/pre_mixed_testcases")
+    if not base_dir.exists():
+        print(f"[ConvoMem] Data not found at {base_dir}, downloading from HuggingFace...")
+        _download_hf_repo(
+            repo_id="Salesforce/ConvoMem",
+            subfolder="core_benchmark/pre_mixed_testcases",
+            local_dir="data/raw/ConvoMem"
+        )
+
     json_files = sorted(p.as_posix() for p in base_dir.rglob("*.json"))
 
     print(f"Found {len(json_files)} JSON files")
@@ -947,13 +998,158 @@ def load_convomem(force_rebuild=False) -> list[EvalData]:
     json.dump([item.model_dump() for item in processed], open(file_path, "w"), indent=4, ensure_ascii=False)
     return processed
 
+@register_benchmark()
+def load_knowmebench(force_rebuild: bool = False) -> list[EvalData]:
+    """
+    Load KnowMeBench benchmark data into EvalData format.
+
+    Creates 3 EvalData samples (one per dataset), each containing all questions for that dataset.
+    Task ID format: knowmebench_{dataset}
+    """
+    file_path = "data/processed_knowmebench.json"
+    if os.path.exists(file_path) and not force_rebuild:
+        return load_from_path(file_path)
+
+    # Define base paths
+    base_dir = Path("data/raw/KnowMeBench/KnowmeBench")
+    chunks_dir = Path("data/raw/KnowMeBench/chunked_output")
+
+    processed = []
+
+    # Process each dataset
+    for dataset_name in ["dataset1", "dataset2", "dataset3"]:
+        # Load chunks
+        chunks_file = chunks_dir / f"{dataset_name}_chunks.json"
+        if not chunks_file.exists():
+            print(f"[Warning] Chunks file not found: {chunks_file}, skipping {dataset_name}")
+            continue
+
+        with open(chunks_file, 'r', encoding='utf-8') as f:
+            chunks_data = json.load(f)
+
+        # Extract chunk texts
+        chunks = [chunk['text'] for chunk in chunks_data]
+        num_chunks = len(chunks)
+        print(f"[KnowMeBench] Loaded {num_chunks} chunks from {dataset_name}")
+
+        # Collect all questions for this dataset
+        all_questions = []
+
+        # Load QA pairs
+        question_dir = base_dir / dataset_name / "question"
+        answer_dir = base_dir / dataset_name / "answer"
+
+        # Get question file names (dataset1 uses *_questions.json, dataset2/3 use *_question.json)
+        if dataset_name == "dataset1":
+            question_files = sorted(question_dir.glob("*_questions.json"))
+        else:
+            question_files = sorted(question_dir.glob("*_question.json"))
+
+        for q_file in question_files:
+            # Extract question type from filename
+            # Handle both *_questions.json and *_question.json formats
+            if dataset_name == "dataset1":
+                question_type = q_file.stem.replace("_questions", "")
+            else:
+                question_type = q_file.stem.replace("_question", "")
+
+            # Load questions
+            with open(q_file, 'r', encoding='utf-8') as f:
+                questions_data = json.load(f)
+
+            # Load answers
+            answer_file = answer_dir / f"{question_type}_answers.json"
+            if not answer_file.exists():
+                # Fallback: try _answer.json format (for dataset2/3)
+                answer_file = answer_dir / f"{question_type}_answer.json"
+            if not answer_file.exists():
+                print(f"[Warning] Answer file not found: {answer_file}, skipping {question_type}")
+                continue
+
+            with open(answer_file, 'r', encoding='utf-8') as f:
+                answers_data = json.load(f)
+
+            # Map questions to answers by ID
+            questions_dict = {q['id']: q for q in questions_data}
+            answers_dict = {a['id']: a for a in answers_data}
+
+            # Process each question
+            for q_id, q_data in questions_dict.items():
+                if q_id not in answers_dict:
+                    continue
+
+                a_data = answers_dict[q_id]
+
+                # Extract answer, handle different types (string, list, etc.)
+                answer_value = a_data.get('answer', '')
+                if isinstance(answer_value, list):
+                    # For list-type answers (e.g., Logical Event Ordering),
+                    # join them into a string or use first element
+                    if answer_value and isinstance(answer_value[0], dict):
+                        # If list of dicts, format as ranked list
+                        answer_parts = []
+                        for i, item in enumerate(answer_value):
+                            if isinstance(item, dict):
+                                if 'event' in item:
+                                    answer_parts.append(f"{i+1}. {item.get('event', '')}")
+                                elif 'text' in item:
+                                    answer_parts.append(f"{i+1}. {item.get('text', '')}")
+                                else:
+                                    answer_parts.append(str(item))
+                            else:
+                                answer_parts.append(str(item))
+                        answer_value = '\n'.join(answer_parts)
+                    else:
+                        # Simple list, join with commas
+                        answer_value = ', '.join(str(x) for x in answer_value)
+                else:
+                    answer_value = str(answer_value)
+
+                # Position at the end (after all chunks)
+                position = num_chunks - 1
+
+                # Create unique qid
+                qid = f"knowmebench_{dataset_name}_{question_type.replace(' ', '-')}_{q_id}"
+
+                # Create question
+                question = Question(
+                    qid=qid,
+                    query=q_data['question'],
+                    answer=answer_value,
+                    position=position,
+                    category=question_type  # Use question type as category
+                )
+
+                all_questions.append(question)
+
+        # Create one EvalData per dataset with all questions
+        if all_questions:
+            evaldata = EvalData(
+                task_id=f"knowmebench_{dataset_name}",
+                questions=all_questions,
+                chunks=chunks
+            )
+            processed.append(evaldata)
+            print(f"[KnowMeBench] {dataset_name}: {len(all_questions)} questions, {num_chunks} chunks")
+
+    print(f"[KnowMeBench] Total processed samples: {len(processed)}")
+
+    # Save processed data
+    if processed:
+        json.dump([item.model_dump() for item in processed], open(file_path, "w"), indent=4, ensure_ascii=False)
+        print(f"[KnowMeBench] Saved to: {file_path}")
+
+    return processed
+
+
 AVAILABLE_BENCHMARKS = sorted(BENCHMARK_REGISTRY)
 print(f"[EvalDataset] Registered benchmarks: {', '.join(AVAILABLE_BENCHMARKS)}")
-# banking77, booksum, clinic, hotpotqa, locomo, longmemeval, memalpha, msc, nlu, perltqa, pubmed_rct, trec_coarse, trec_fine
+# banking77, booksum, clinic, hotpotqa, knowmebench, locomo, longmemeval, memalpha, msc, nlu, perltqa, pubmed_rct, trec_coarse, trec_fine
 
 if __name__ == '__main__':
     # load_synth("ss2")
     # load_synth("ss5")
     # load_synth("ss10")
     # load_synth("ss10_train")
-    load_longmemeval()
+    load_longmemeval(force_rebuild=True)
+    # load_knowmebench()

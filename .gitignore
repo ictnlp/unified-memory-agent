@@ -3,7 +3,8 @@ processed*
 .env
 .venv/
 *.parquet
-raw/
+data/raw/*
+!data/raw/KnowMeBench/
 results/
 tmp/
 *.log
@@ -20,6 +21,7 @@ agents.backup.*
 diagnose_*.py
 deduplicate_*.py
 test_*.py
+!external/A-mem/test_advanced.py
 stats.txt
 check_*.py
 TODO

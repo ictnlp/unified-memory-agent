@@ -29,7 +29,7 @@ class ConcatAgent(BaseAgent):
         """Check if client is AsyncOpenAI"""
         return hasattr(self.client, '__class__') and 'Async' in self.client.__class__.__name__
     
-    def add_memory(
+    async def add_memory_async(
         self,
         chunk: str
     ):

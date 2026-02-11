@@ -10,6 +10,7 @@ import time
 import asyncio
 from typing import List, Dict, Any, Optional
 from openai import AsyncOpenAI
+import shutil
 
 from .base_agent import BaseAgent, MODEL_NAME_MAP
 
@@ -164,7 +165,7 @@ class GAMAgent(BaseAgent):
         max_research_iters: int = 3,
         retriever_types: List[str] = ["bm25"],  # 可选: "index", "bm25", "dense"
         top_k: int = 10,
-        index_dir: str = "./tmp/gam_indices"
+        index_dir: str = "./tmp/gam/indices"
     ):
         """
         初始化 GAM Agent
@@ -175,7 +176,7 @@ class GAMAgent(BaseAgent):
             max_research_iters: ResearchAgent最大迭代次数
             retriever_types: 使用的检索器类型列表
             top_k: 检索top-k结果
-            index_dir: 索引存储目录
+            index_dir: 索引存储目录基础路径
         """
         super().__init__(client, model_name)
 
@@ -185,7 +186,11 @@ class GAMAgent(BaseAgent):
         self.max_research_iters = max_research_iters
         self.retriever_types = retriever_types
         self.top_k = top_k
-        self.index_dir = index_dir
+
+        # 使用时间戳生成唯一目录名，每次实例化都使用新目录
+        timestamp = int(time.time() * 1000)  # 毫秒级时间戳
+        self.index_dir = f"{index_dir}_{timestamp}"
+        os.makedirs(self.index_dir, exist_ok=True)
 
         # 初始化 GAM 组件
         self._init_gam_components()
@@ -231,10 +236,7 @@ class GAMAgent(BaseAgent):
         # 构建各种检索器
         if "index" in self.retriever_types:
             try:
-                import shutil
                 page_index_dir = os.path.join(self.index_dir, "page_index")
-                if os.path.exists(page_index_dir):
-                    shutil.rmtree(page_index_dir)
 
                 index_config = IndexRetrieverConfig(index_dir=page_index_dir)
                 index_retriever = IndexRetriever(index_config.__dict__)
@@ -246,10 +248,7 @@ class GAMAgent(BaseAgent):
 
         if "bm25" in self.retriever_types:
             try:
-                import shutil
                 bm25_index_dir = os.path.join(self.index_dir, "bm25_index")
-                if os.path.exists(bm25_index_dir):
-                    shutil.rmtree(bm25_index_dir)
 
                 bm25_config = BM25RetrieverConfig(
                     index_dir=bm25_index_dir,
@@ -264,10 +263,7 @@ class GAMAgent(BaseAgent):
 
         if "dense" in self.retriever_types:
             try:
-                import shutil
                 dense_index_dir = os.path.join(self.index_dir, "dense_index")
-                if os.path.exists(dense_index_dir):
-                    shutil.rmtree(dense_index_dir)
 
                 dense_config = DenseRetrieverConfig(
                     index_dir=dense_index_dir,
@@ -309,95 +305,53 @@ class GAMAgent(BaseAgent):
     async def QA_batch_async(self, query_list: List[str]) -> List[str]:
         """
         异步批量问答
-        使用 ResearchAgent.research() 方法
+        使用 ResearchAgent.research() 方法进行深度研究，然后用 generator 生成最终答案
         """
-        try:
-            # 确保检索器已构建
-            if self.research_agent is None:
-                await self._build_retrievers()
+        # 确保检索器已构建
+        if self.research_agent is None:
+            await self._build_retrievers()
 
-            # 如果没有可用的研究代理，使用简单的fallback
-            if self.research_agent is None:
-                return await self._fallback_qa_batch(query_list)
+        # 使用 ResearchAgent 逐个进行问答（因为 research 方法可能不支持批量）
+        import asyncio
 
-            # 使用 ResearchAgent 逐个进行问答（因为 research 方法可能不支持批量）
-            import asyncio
+        async def research_single(query: str) -> str:
+            """单个问题的研究和答案生成"""
+            try:
+                # 1. 使用 ResearchAgent 进行深度研究
+                research_result = await asyncio.to_thread(self.research_agent.research, query)
+                research_summary = research_result.integrated_memory
 
-            async def research_single(query: str) -> str:
-                """单个问题的研究"""
-                try:
-                    # GAM 的 research 可能是同步的，需要用 to_thread 包装
-                    research_result = await asyncio.to_thread(self.research_agent.research, query)
-                    answer = research_result.integrated_memory
-                    return answer.strip() if answer else "I don't have enough information to answer this question."
-                except Exception as e:
-                    return self._handle_api_error(e, query)
+                # 2. 使用研究摘要作为 context，生成最终答案
+                prompt = f"""You are a careful reading assistant.
+Use the given Context to answer the Question.
+Answer with ONLY the final answer string; no extra words.
 
-            # 并发处理所有问题
-            results = await asyncio.gather(*[research_single(q) for q in query_list])
-            return results
+Question:
+{query}
 
-        except Exception as e:
-            print(f"Error in QA_batch_async: {e}")
-            return [self._handle_api_error(e, q) for q in query_list]
+Context:
+{research_summary}
 
-    async def _fallback_qa_batch(self, query_list: List[str]) -> List[str]:
-        """
-        当检索器不可用时的fallback批量问答方法
-        直接使用记忆摘要生成答案
-        """
-        try:
-            memory_state = self.memory_store.load()
-
-            if not memory_state or not memory_state.abstracts:
-                return ["I don't have any memory to answer questions from."] * len(query_list)
-
-            # 获取所有记忆摘要
-            abstracts = memory_state.abstracts
-            memory_context = "\n".join([f"Memory {i+1}: {abstract}"
-                                       for i, abstract in enumerate(abstracts)])
-
-            # 批量生成答案
-            results = []
-            for query in query_list:
-                prompt = f"""Based on the following memory abstracts, answer the question concisely.
-
-Memory Abstracts:
-{memory_context}
-
-Question: {query}
 Answer:"""
 
-                try:
-                    response = await self.client.chat.completions.create(
-                        model=MODEL_NAME_MAP.get(self.model_name, self.model_name),
-                        messages=[{"role": "user", "content": prompt}],
-                        max_tokens=256,
-                        temperature=0.3
-                    )
-                    answer = response.choices[0].message.content
-                    results.append(answer.strip())
-                except Exception as e:
-                    results.append(self._handle_api_error(e, query))
+                response_dict = await self.generator.generate_single(prompt=prompt)
+                answer = response_dict.get("text", "").strip()
 
-            return results
+                return answer if answer else "I don't have enough information to answer this question."
+            except Exception as e:
+                return self._handle_api_error(e, query)
 
-        except Exception as e:
-            return [self._handle_api_error(e, q) for q in query_list]
+        # 并发处理所有问题
+        results = await asyncio.gather(*[research_single(q) for q in query_list])
 
-    def reset(self) -> None:
-        """
-        重置代理状态
-        清空所有记忆和索引
-        """
-        # 重新初始化 GAM 组件
-        self._init_gam_components()
+        # 关闭 BM25 searcher（如果存在）
+        if self.retrievers and "keyword" in self.retrievers:
+            try:
+                self.retrievers["keyword"].searcher.close()
+            except Exception:
+                pass
 
-        # 清理索引目录
-        if os.path.exists(self.index_dir):
-            import shutil
-            shutil.rmtree(self.index_dir)
-            os.makedirs(self.index_dir, exist_ok=True)
+        return results
 
     def get_memory_stats(self) -> Dict[str, Any]:
         """

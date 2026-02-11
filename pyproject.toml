@@ -9,10 +9,10 @@ description = "A comprehensive evaluation framework for memory-based conversatio
 readme = "README.md"
 license = {text = "Apache-2.0"}
 authors = [
-    {name = "Zhang Kehao", email = "your.email@example.com"},
+    {name = "Zhang Kehao", email = "zhangkehao22z@ict.ac.cn"},
 ]
 maintainers = [
-    {name = "Zhang Kehao", email = "your.email@example.com"},
+    {name = "Zhang Kehao", email = "zhangkehao22z@ict.ac.cn"},
 ]
 classifiers = [
     "Development Status :: 4 - Beta",

@@ -23,8 +23,8 @@ def simple_tokenize(text):
 
 class BaseLLMController(ABC):
     @abstractmethod
-    def get_completion(self, prompt: str) -> str:
-        """Get completion from LLM"""
+    async def get_completion(self, prompt: str) -> str:
+        """Get completion from LLM (async version)"""
         pass
 
 class OpenAIController(BaseLLMController):
@@ -39,9 +39,9 @@ class OpenAIController(BaseLLMController):
             self.client = OpenAI(api_key=api_key)
         except ImportError:
             raise ImportError("OpenAI package not found. Install it with: pip install openai")
-    
-    def get_completion(self, prompt: str, response_format: dict, temperature: float = 0.7) -> str:
-        response = self.client.chat.completions.create(
+
+    async def get_completion(self, prompt: str, response_format: dict, temperature: float = 0.7) -> str:
+        response = await self.client.chat.completions.create(
             model=self.model,
             messages=[
                 {"role": "system", "content": "You must respond with a JSON object."},
@@ -85,7 +85,7 @@ class OllamaController(BaseLLMController):
         
         return result
 
-    def get_completion(self, prompt: str, response_format: dict, temperature: float = 0.7) -> str:
+    async def get_completion(self, prompt: str, response_format: dict, temperature: float = 0.7) -> str:
         try:
             response = completion(
                 model="ollama_chat/{}".format(self.model),
@@ -134,12 +134,12 @@ class SGLangController(BaseLLMController):
         
         return result
 
-    def get_completion(self, prompt: str, response_format: dict, temperature: float = 0.7) -> str:
+    async def get_completion(self, prompt: str, response_format: dict, temperature: float = 0.7) -> str:
         try:
             # Extract JSON schema from response_format and convert to string format
             json_schema = response_format.get("json_schema", {}).get("schema", {})
             json_schema_str = json.dumps(json_schema)
-            
+
             # Prepare SGLang request with correct format
             payload = {
                 "text": prompt,
@@ -149,7 +149,7 @@ class SGLangController(BaseLLMController):
                     "json_schema": json_schema_str  # SGLang expects JSON schema as string
                 }
             }
-            
+
             # Make request to SGLang server
             response = requests.post(
                 f"{self.base_url}/generate",
@@ -157,7 +157,7 @@ class SGLangController(BaseLLMController):
                 json=payload,
                 timeout=60
             )
-            
+
             if response.status_code == 200:
                 result = response.json()
                 # SGLang returns the generated text in 'text' field
@@ -166,7 +166,7 @@ class SGLangController(BaseLLMController):
             else:
                 print(f"SGLang server returned status {response.status_code}: {response.text}")
                 raise Exception(f"SGLang server error: {response.status_code}")
-                
+
         except Exception as e:
             print(f"SGLang completion error: {e}")
             empty_response = self._generate_empty_response(response_format)
@@ -206,7 +206,7 @@ class LiteLLMController(BaseLLMController):
         
         return result
 
-    def get_completion(self, prompt: str, response_format: dict, temperature: float = 0.7) -> str:
+    async def get_completion(self, prompt: str, response_format: dict, temperature: float = 0.7) -> str:
         try:
             # Prepare completion arguments
             completion_args = {
@@ -218,16 +218,16 @@ class LiteLLMController(BaseLLMController):
                 "response_format": response_format,
                 "temperature": temperature
             }
-            
+
             # Add API base and key if provided
             if self.api_base:
                 completion_args["api_base"] = self.api_base
             if self.api_key:
                 completion_args["api_key"] = self.api_key
-                
+
             response = completion(**completion_args)
             return response.choices[0].message.content
-            
+
         except Exception as e:
             print(f"LiteLLM completion error: {e}")
             empty_response = self._generate_empty_response(response_format)
@@ -260,7 +260,7 @@ class LLMController:
 
 class MemoryNote:
     """Basic memory unit with metadata"""
-    def __init__(self, 
+    def __init__(self,
                  content: str,
                  id: Optional[str] = None,
                  keywords: Optional[List[str]] = None,
@@ -269,22 +269,14 @@ class MemoryNote:
                  retrieval_count: Optional[int] = None,
                  timestamp: Optional[str] = None,
                  last_accessed: Optional[str] = None,
-                 context: Optional[str] = None, 
+                 context: Optional[str] = None,
                  evolution_history: Optional[List] = None,
                  category: Optional[str] = None,
                  tags: Optional[List[str]] = None,
                  llm_controller: Optional[LLMController] = None):
-        
+
         self.content = content
-        
-        # Generate metadata using LLM if not provided and controller is available
-        if llm_controller and any(param is None for param in [keywords, context, category, tags]):
-            analysis = self.analyze_content(content, llm_controller)
-            print("analysis", analysis)
-            keywords = keywords or analysis["keywords"]
-            context = context or analysis["context"]
-            tags = tags or analysis["tags"]
-        
+
         # Set default values for optional parameters
         self.id = id or str(uuid.uuid4())
         self.keywords = keywords or []
@@ -294,18 +286,49 @@ class MemoryNote:
         current_time = datetime.now().strftime("%Y%m%d%H%M")
         self.timestamp = timestamp or current_time
         self.last_accessed = last_accessed or current_time
-        
+
         # Handle context that can be either string or list
         self.context = context or "General"
         if isinstance(self.context, list):
             self.context = " ".join(self.context)  # Convert list to string by joining
-            
+
         self.evolution_history = evolution_history or []
         self.category = category or "Uncategorized"
         self.tags = tags or []
 
+    @classmethod
+    async def create(cls,
+                     content: str,
+                     id: Optional[str] = None,
+                     keywords: Optional[List[str]] = None,
+                     links: Optional[Dict] = None,
+                     importance_score: Optional[float] = None,
+                     retrieval_count: Optional[int] = None,
+                     timestamp: Optional[str] = None,
+                     last_accessed: Optional[str] = None,
+                     context: Optional[str] = None,
+                     evolution_history: Optional[List] = None,
+                     category: Optional[str] = None,
+                     tags: Optional[List[str]] = None,
+                     llm_controller: Optional[LLMController] = None):
+        """Async factory method to create MemoryNote with LLM analysis"""
+
+        # Generate metadata using LLM if not provided and controller is available
+        if llm_controller and any(param is None for param in [keywords, context, tags]):
+            analysis = await cls.analyze_content(content, llm_controller)
+            print("analysis", analysis)
+            keywords = keywords or analysis["keywords"]
+            context = context or analysis["context"]
+            tags = tags or analysis["tags"]
+
+        # Create instance using regular __init__
+        return cls(content=content, id=id, keywords=keywords, links=links,
+                  importance_score=importance_score, retrieval_count=retrieval_count,
+                  timestamp=timestamp, last_accessed=last_accessed, context=context,
+                  evolution_history=evolution_history, category=category, tags=tags)
+
     @staticmethod
-    def analyze_content(content: str, llm_controller: LLMController) -> Dict:            
+    async def analyze_content(content: str, llm_controller: LLMController) -> Dict:
         """Analyze content to extract keywords, context, and other metadata"""
         prompt = """Generate a structured analysis of the following content by:
             1. Identifying the most salient keywords (focus on nouns, verbs, and key concepts)
@@ -320,7 +343,7 @@ class MemoryNote:
                     // Don't include keywords that are the name of the speaker or time
                     // At least three keywords, but don't be too redundant.
                 ],
-                "context": 
+                "context":
                     // one sentence summarizing:
                     // - Main topic/domain
                     // - Key arguments/points
@@ -336,7 +359,7 @@ class MemoryNote:
             Content for analysis:
             """ + content
         try:
-            response = llm_controller.llm.get_completion(prompt,response_format={"type": "json_schema", "json_schema": {
+            response = await llm_controller.llm.get_completion(prompt,response_format={"type": "json_schema", "json_schema": {
                         "name": "response",
                         "schema": {
                             "type": "object",
@@ -363,7 +386,7 @@ class MemoryNote:
                         "strict": True
                 }
             })
-            
+
             # try:
             #     # Clean the response in case there's extra text
             #     response_cleaned = response.strip()
@@ -376,7 +399,7 @@ class MemoryNote:
             #         end_idx = response_cleaned.rfind('}')
             #         if end_idx != -1:
             #             response_cleaned = response_cleaned[:end_idx+1]
-            try:        
+            try:
                 response = re.sub(r'^```json\s*|\s*```$', '', response, flags=re.MULTILINE).strip()
                 analysis = json.loads(response)
             except:
@@ -387,9 +410,9 @@ class MemoryNote:
                     "context": "General",
                     "tags": []
                 }
-            
+
             return analysis
-            
+
         except Exception as e:
             print(f"Error analyzing content: {str(e)}")
             print(f"Raw response: {response}")
@@ -711,13 +734,13 @@ class AgenticMemorySystem:
         self.evo_cnt = 0 
         self.evo_threshold = evo_threshold
 
-    def add_note(self, content: str, time: str = None, **kwargs) -> str:
+    async def add_note(self, content: str, time: str = None, **kwargs) -> str:
         """Add a new memory note"""
-        note = MemoryNote(content=content, llm_controller=self.llm_controller, timestamp=time, **kwargs)
-        
+        note = await MemoryNote.create(content=content, llm_controller=self.llm_controller, timestamp=time, **kwargs)
+
         # Update retriever with all documents
         # all_docs = [m.content for m in self.memories.values()]
-        evo_label, note = self.process_memory(note)
+        evo_label, note = await self.process_memory(note)
         self.memories[note.id] = note
         self.retriever.add_documents(["content:" + note.content + " context:" + note.context + " keywords: " + ", ".join(note.keywords) + " tags: " + ", ".join(note.tags)])
         if evo_label == True:
@@ -750,12 +773,12 @@ class AgenticMemorySystem:
             # Add both the content and metadata as separate documents for better retrieval
             self.retriever.add_documents([memory.content + " , " + metadata_text])
     
-    def process_memory(self, note: MemoryNote) -> bool:
+    async def process_memory(self, note: MemoryNote) -> bool:
         """Process a memory note and return an evolution label"""
         neighbor_memory, indices = self.find_related_memories(note.content, k=5)
         prompt_memory = self.evolution_system_prompt.format(context=note.context, content=note.content, keywords=note.keywords, nearest_neighbors_memories=neighbor_memory,neighbor_number=len(indices))
         # print("prompt_memory", prompt_memory)
-        response = self.llm_controller.llm.get_completion(
+        response = await self.llm_controller.llm.get_completion(
             prompt_memory,response_format={"type": "json_schema", "json_schema": {
                         "name": "response",
                         "schema": {
@@ -817,7 +840,7 @@ class AgenticMemorySystem:
                 end_idx = response_cleaned.rfind('}')
                 if end_idx != -1:
                     response_cleaned = response_cleaned[:end_idx+1]
-            
+
             response_json = json.loads(response_cleaned)
             # print("response_json", response_json, type(response_json))
         except json.JSONDecodeError as e:
