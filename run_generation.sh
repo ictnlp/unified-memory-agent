@@ -1,38 +1,38 @@
 export EMBEDDING_SERVICE_ENDPOINT="http://localhost:8080/embeddings"
 export PROMPT_TEMPLATE_PATH="/mnt/pfs-guan-ssai/nlu/zhangkehao/unified-memory-agent/prompt_template.yaml"
-# export USE_SMALL_VALSETS=1
-# vllm serve /mnt/pfs-guan-ssai/nlu/zhangkehao/verl/checkpoints/tool_memagent/qwen3-4b_GRPO_extend_datav3/global_step_600/hf -tp 8
-# VLLM_ATTENTION_BACKEND=FLASH_ATTN vllm serve sentence-transformers/all-MiniLM-L6-v2 --port 8080 --max-model-len 512
 
-# cd /mnt/pfs-guan-ssai/nlu/zhangkehao/unified-memory-agent/external/infinity
-# uv venv
-# source .venv/bin/activate
-# cd libs/infinity_emb
-# uv pip install -e ".[all]"
-# uv pip install click==8.1.8
-# infinity_emb v2 --model-id sentence-transformers/all-MiniLM-L6-v2 --port 8080
+function kill_vllm_by_port() {
+    local port=$1
+    local pid=$(ss -lptn "sport = :$port" | grep -oE 'pid=[0-9]+' | cut -d= -f2)
 
+    if [ -z "$pid" ]; then
+        echo "No process on port $port."
+        return
+    fi
 
-# Test-Time Learning (TTL): trec_coarse, trec_fine, nlu, clinic, banking77, pubmed_rct
-# Accurate Retrieval (AR): hotpotqa, locomo, longmemeval, msc, perltqa, squad, convomem
-# Long Range Understanding (LRU): infbench, booksum
+    echo "Stopping vLLM (PID: $pid)..."
+    kill -2 "$pid" # 发送 SIGINT
 
-# for AGENT in concat emergence memagent memalpha rag gam
-# for TASK in synth-ss2 synth-ss5 synth-ss10 synth-ss20 synth-ss30 synth-ss40 synth-ss50 banking77 booksum clinic hotpotqa locomo longmemeval msc nlu perltqa pubmed_rct trec_coarse trec_fine squad infbench convomem
-until curl -s http://localhost:8080/health > /dev/null 2>&1; do
-    sleep 2
-    echo "wait for server port 8080..."
-done
-until curl -s http://localhost:8000/health > /dev/null 2>&1; do
-    sleep 2
-    echo "wait for server port 8000..."
-done
+    # 等待循环：利用 kill -0 检查进程是否存在
+    for i in {1..15}; do
+        kill -0 "$pid" 2>/dev/null || break # 进程消失则跳出循环
+        sleep 1
+    done
 
-# until curl -s http://localhost:8001/health > /dev/null 2>&1; do
-#     sleep 2
-#     echo "wait for server port 8001..."
-# done
+    # 兜底强制查杀
+    if kill -0 "$pid" 2>/dev/null; then
+        echo "Force killing PID $pid and children..."
+        pkill -9 -P "$pid"  # 杀子进程 (Ray workers)
+        kill -9 "$pid"      # 杀主进程
+    fi
 
+    echo "Cleanup finished for port $port."
+    echo "Waiting for GPU resources to be released..."
+    sleep 15  # 等待GPU资源完全释放（CUDA上下文、显存、Ray workers等）
+}
+# kill_vllm_by_port 8000
+# kill_vllm_by_port 8001
+# kill_vllm_by_port 8080
 # for TASK in synth-ss500 synth-ss100
 # do
 #     python evaluate_async.py \
@@ -44,77 +44,40 @@ done
 #         --generate_only
 # done
 
-# vllm serve Qwen/Qwen3-4B-Instruct-2507 -tp 4 -dp 2 --max-model-len 262144 --enable-chunked-prefill --max-num-batched-tokens 512
-# for TASK in synth-ss500 synth-ss100
-# do
-#     python evaluate_async.py \
-#         --task $TASK \
-#         --agent concat \
-#         --agent_id concat16k \
-#         --concurrency 50 \
-#         --output_dir results/qwen3-4b/$TASK \
-#         --generate_only
-# done
-
-# for TASK in synth-ss500 synth-ss100
-# do
-#     python evaluate_async.py \
-#         --task $TASK \
-#         --agent rag \
-#         --agent_id rag16k \
-#         --concurrency 50 \
-#         --output_dir results/qwen3-4b/$TASK \
-#         --generate_only
-# done
-
-# vllm serve BytedTsinghua-SIA/RL-MemoryAgent-14B -tp 8 --gpu-memory-utilization 0.8 --rope-scaling '{"rope_type":"yarn","factor":4.0,"original_max_position_embeddings":32768}' --max-model-len 131072
-# for AGENT in memagent
-# do
-#     for TASK in synth-ss2 synth-ss5 synth-ss10 synth-ss20 synth-ss30 synth-ss40 synth-ss50 banking77 booksum clinic hotpotqa locomo longmemeval msc nlu perltqa pubmed_rct trec_coarse trec_fine squad infbench convomem
-#     do
-#         python evaluate_async.py \
-#             --task $TASK \
-#             --agent $AGENT \
-#             --agent_id memagent14b \
-#             --concurrency 10 \
-#             --output_dir results/qwen3-4b/$TASK \
-#             --model BytedTsinghua-SIA/RL-MemoryAgent-14B \
-#             --generate_only
-#     done
-# done
-
-# CUDA_VISIBLE_DEVICES=4,5,6,7 vllm serve Qwen/Qwen3-4B-Instruct-2507 -tp 4 --max-model-len 262144 --port 8001 > vllm1.log 2>&1 &
-# CUDA_VISIBLE_DEVICES=0,1,2,3 vllm serve YuWangX/Memalpha-4B -tp 4 --rope-scaling '{"rope_type":"yarn","factor":4.0,"original_max_position_embeddings":32768}' --max-model-len 131072 > vllm0.log 2>&1 &
-# for TASK in synth-ss500 synth-ss100
-# do
-#     python evaluate_async.py \
-#         --task $TASK \
-#         --agent memalpha \
-#         --agent_id memalphav1 \
-#         --model YuWangX/Memalpha-4B \
-#         --concurrency 50 \
-#         --output_dir results/qwen3-4b/$TASK \
-#         --generate_only
-# done
-
-
-# CUDA_VISIBLE_DEVICES=0,1,2,3 vllm serve Mem-Lab/Qwen2.5-7B-RL-RAG-Q2-EM-Release -tp 4 --rope-scaling '{"rope_type":"yarn","factor":4.0,"original_max_position_embeddings":32768}' --max-model-len 131072 > vllm0.log 2>&1 &
-# CUDA_VISIBLE_DEVICES=4,5,6,7 vllm serve Qwen/Qwen3-4B-Instruct-2507 -tp 4 --max-model-len 262144 --port 8001 > vllm1.log 2>&1 &
-# for TASK in synth-ss500 synth-ss100
-# do
-#     python evaluate_async.py \
-#         --task $TASK \
-#         --agent mem1 \
-#         --model Mem-Lab/Qwen2.5-7B-RL-RAG-Q2-EM-Release \
-#         --concurrency 50 \
-#         --output_dir results/qwen3-4b/$TASK \
-#         --generate_only
-# done
-
-# CUDA_VISIBLE_DEVICES=0,1,2,3 vllm serve /mnt/pfs-guan-ssai/nlu/zhangkehao/unified-memory-agent/external/verl/checkpoints/tool_memagent/qwen3-4b_stage1_memory/global_step_63/hf -tp 4 > vllm0.log 2>&1 &
-# CUDA_VISIBLE_DEVICES=4,5,6,7 vllm serve /mnt/pfs-guan-ssai/nlu/zhangkehao/unified-memory-agent/external/verl/checkpoints/tool_memagent/qwen3-4b_stage2_qa/global_step_63/hf -tp 4 --port 8001 > vllm1.log 2>&1 &
+# CUDA_VISIBLE_DEVICES=0,1,2,3 vllm serve /mnt/pfs-guan-ssai/nlu/zhangkehao/unified-memory-agent/external/verl/checkpoints/tool_memagent/qwen3-4b_stage1_memory/global_step_63/hf -tp 4 --gpu-memory-utilization 0.85 > vllm0.log 2>&1 &
+# CUDA_VISIBLE_DEVICES=4,5,6,7 vllm serve /mnt/pfs-guan-ssai/nlu/zhangkehao/unified-memory-agent/external/verl/checkpoints/tool_memagent/qwen3-4b_stage2_qa/global_step_63/hf -tp 4 --gpu-memory-utilization 0.85 --port 8001 > vllm1.log 2>&1 &
+# source external/infinity/libs/infinity_emb/.venv/bin/activate
+# infinity_emb v2 --model-id sentence-transformers/all-MiniLM-L6-v2 --port 8080 > infinity_emb.log 2>&1 &
+# source .venv/bin/activate
+until curl -s http://localhost:8080/health > /dev/null 2>&1; do
+    sleep 2
+    echo "wait for server port 8080..."
+    if ! pgrep -f "infinity_emb" > /dev/null; then
+        echo "Error: infinity_emb process died. Check infinity_emb.log for details:"
+        cat infinity_emb.log
+        exit 1
+    fi
+done
+until curl -s http://localhost:8000/health > /dev/null 2>&1; do
+    sleep 2
+    echo "wait for server port 8000..."
+    if ! pgrep -f "vllm serve" > /dev/null; then
+        echo "Error: vllm process died. Check vllm0.log for details:"
+        cat vllm0.log
+        exit 1
+    fi
+done
+until curl -s http://localhost:8001/health > /dev/null 2>&1; do
+    sleep 2
+    echo "wait for server port 8001..."
+    if ! pgrep -f "vllm serve" > /dev/null; then
+        echo "Error: vllm process died. Check vllm1.log for details:"
+        cat vllm1.log
+        exit 1
+    fi
+done
 export VERL_QA_MODEL_NAME="/mnt/pfs-guan-ssai/nlu/zhangkehao/unified-memory-agent/external/verl/checkpoints/tool_memagent/qwen3-4b_stage2_qa/global_step_63/hf"
-for TASK in longmemeval msc nlu perltqa pubmed_rct trec_coarse trec_fine squad infbench convomem
+for TASK in hotpotqa
 do
     python evaluate_async.py \
         --task $TASK \

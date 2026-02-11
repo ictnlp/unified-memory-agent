@@ -6,6 +6,12 @@ from pydantic import BaseModel
 import random
 import pandas as pd
 import urllib.request
+import sys
+
+# Add data directory to Python path for importing synthv1_async if running from parent directory
+data_dir = Path(__file__).parent
+if str(data_dir) not in sys.path:
+    sys.path.insert(0, str(data_dir))
 
 CONV_START_PROMPT = "Below is a conversation between {} and {}.\n\n"
 
@@ -523,15 +529,13 @@ def load_hotpotqa_deprecated(force_rebuild=False, num_docs: int=200, num_queries
     return processed
 
 @register_benchmark()
-def load_hotpotqa(force_rebuild=False, num_docs: int=200, num_queries: int=1, num_samples: int=128):
+def load_hotpotqa(force_rebuild=False, num_docs: int=200):
     """
     Load HotpotQA data from MemAgent_minimal format
     
     Args:
         force_rebuild: Force rebuild cached data
         num_docs: Number of documents (50, 100, 200, 400, 800, 1600, 3200, 6400, 12800, 25600, 51200)
-        num_queries: Number of queries per sample (fixed at 1 for this format)
-        num_samples: Number of samples (fixed at 128 for this format)
     """
     file_path = f"data/processed_hotpotqa_{num_docs}.json"
     if os.path.exists(file_path) and not force_rebuild:
@@ -540,7 +544,7 @@ def load_hotpotqa(force_rebuild=False, num_docs: int=200, num_queries: int=1, nu
     # Load source data
     source_file = f"data/raw/hotpotqa/eval_{num_docs}.json"
     if not os.path.exists(source_file):
-        download_url = f"https://hf-mirror.com/datasets/BytedTsinghua-SIA/hotpotqa/blob/main/eval_{num_docs}.json"
+        download_url = f"https://hf-mirror.com/datasets/BytedTsinghua-SIA/hotpotqa/resolve/main/eval_{num_docs}.json"
         _download_file(download_url, source_file)
     
     raw = json.load(open(source_file))
@@ -1144,12 +1148,6 @@ def load_knowmebench(force_rebuild: bool = False) -> list[EvalData]:
 
 AVAILABLE_BENCHMARKS = sorted(BENCHMARK_REGISTRY)
 print(f"[EvalDataset] Registered benchmarks: {', '.join(AVAILABLE_BENCHMARKS)}")
-# banking77, booksum, clinic, hotpotqa, knowmebench, locomo, longmemeval, memalpha, msc, nlu, perltqa, pubmed_rct, trec_coarse, trec_fine
 
 if __name__ == '__main__':
-    # load_synth("ss2")
-    # load_synth("ss5")
-    # load_synth("ss10")
-    # load_synth("ss10_train")
-    load_longmemeval(force_rebuild=True)
-    # load_knowmebench()
+    load_hotpotqa()

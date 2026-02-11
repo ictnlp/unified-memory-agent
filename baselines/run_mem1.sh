@@ -9,17 +9,32 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 vllm serve Mem-Lab/Qwen2.5-7B-RL-RAG-Q2-EM-Release 
 until curl -s http://localhost:8080/health > /dev/null 2>&1; do
     sleep 2
     echo "wait for server port 8080..."
+    if ! pgrep -f "infinity_emb" > /dev/null; then
+        echo "Error: infinity_emb process died. Check infinity_emb.log for details:"
+        cat infinity_emb.log
+        exit 1
+    fi
 done
 until curl -s http://localhost:8000/health > /dev/null 2>&1; do
     sleep 2
     echo "wait for server port 8000..."
+    if ! pgrep -f "vllm serve" > /dev/null; then
+        echo "Error: vllm process died. Check vllm0.log for details:"
+        cat vllm0.log
+        exit 1
+    fi
 done
 until curl -s http://localhost:8001/health > /dev/null 2>&1; do
     sleep 2
     echo "wait for server port 8001..."
+    if ! pgrep -f "vllm serve" > /dev/null; then
+        echo "Error: vllm process died. Check vllm1.log for details:"
+        cat vllm1.log
+        exit 1
+    fi
 done
 
-TASKS="synth-ss2 synth-ss5"
+TASKS="longmemeval locomo hotpotqa synth-ss2 synth-ss5 synth-ss10 synth-ss20 synth-ss30 synth-ss40 synth-ss50 banking77 booksum clinic msc nlu perltqa pubmed_rct trec_coarse trec_fine squad infbench convomem knowmebench"
 RESULTS_DIR="results"
 for TASK in $TASKS
 do

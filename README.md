@@ -4,7 +4,7 @@ A comprehensive evaluation framework for testing memory-based conversational AI 
 
 ## Overview
 
-This system evaluates how well AI agents can answer questions based on accumulated conversational memory over time. It supports 14 benchmark datasets.
+This system evaluates how well AI agents can answer questions based on accumulated conversational memory over time. It supports several benchmark datasets.
 
 ## Installation
 
@@ -12,27 +12,18 @@ This project requires setting up two separate Python environments to handle diff
 
 ### Prerequisites
 
-- Python 3.8+
+- Python 3.10+
 - [uv](https://docs.astral.sh/uv/) package installer (recommended for faster installs)
 
 ### Environment 1: Main Project Environment
 
 ```bash
 # Clone the repository
-git clone https://gitlab.chehejia.com/zhangkehao/unified-memory-agent.git
+git clone https://github.com/ictnlp/unified-memory-agent.git
 cd unified-memory-agent
 
-# Create virtual environment
-uv venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-
-# Install main dependencies
-uv pip install -r requirements.txt
-
-# Install VERL in development mode
-cd external/verl
-uv pip install -e .
-cd ../..
+uv sync
+source .venv/bin/activate
 ```
 
 ### Environment 2: Infinity_emb Environment
@@ -43,7 +34,7 @@ cd external/infinity/libs/infinity_emb
 
 # Create separate virtual environment
 uv venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+source .venv/bin/activate
 
 # Install infinity_emb with all optional dependencies
 uv pip install -e ".[all]"

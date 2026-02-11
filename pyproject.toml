@@ -29,10 +29,10 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 dependencies = [
     "openai>=1.0.0",
-    "numpy",
+    "numpy>=1.26",
     "pandas",
     "regex",
     "python-dotenv",
@@ -47,6 +47,11 @@ dependencies = [
     "scipy",
     "uvloop",
     "tqdm",
+    "verl",
+    "vllm>=0.14.0",
+    "json-repair>=0.57.1",
+    "gpustat>=1.1.1",
+    "rank-bm25>=0.2.2",
 ]
 
 [project.optional-dependencies]
@@ -69,12 +74,9 @@ jupyter = [
 ]
 
 [project.urls]
-"Homepage" = "https://github.com/yourusername/unified-memory-agent"
-"Bug Reports" = "https://github.com/yourusername/unified-memory-agent/issues"
-"Source" = "https://github.com/yourusername/unified-memory-agent"
-
-[project.scripts]
-uma-eval = "evaluate_async:main"
+"Homepage" = "https://github.com/deadpool66"
+"Bug Reports" = "https://github.com/ictnlp/unified-memory-agent/issues"
+"Source" = "https://github.com/ictnlp/unified-memory-agent"
 
 [tool.setuptools.packages.find]
 include = [
@@ -88,3 +90,6 @@ exclude = [
 
 [tool.setuptools.dynamic]
 version = {attr = "config.VERSION"}
+
+[tool.uv.sources]
+verl = { path = "external/verl", editable = true }

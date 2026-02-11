@@ -17,6 +17,7 @@ external/*/.pytest_cache/
 
 # Backup files
 agents.backup.*
+*.backup
 .claude/
 diagnose_*.py
 deduplicate_*.py

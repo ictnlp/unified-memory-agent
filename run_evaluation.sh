@@ -1,6 +1,5 @@
-export BASE_DIR="path/to/unified-memory-agent"
 export EMBEDDING_SERVICE_ENDPOINT="http://localhost:8080/embeddings"
-export PROMPT_TEMPLATE_PATH="${BASE_DIR}/prompt_template.yaml"
+export PROMPT_TEMPLATE_PATH="prompt_template.yaml"
 
 MODEL=dp66/UMA-4B
 AGENT_ID=UMA
@@ -44,7 +43,7 @@ function kill_vllm_by_port() {
 kill_vllm_by_port 8000
 vllm serve $MODEL -dp 2 -tp 4 --gpu-memory-utilization 0.8 --enforce-eager > vllm.log 2>&1 &
 kill_vllm_by_port 8080
-source ${BASE_DIR}/external/infinity/.venv/bin/activate
+source external/infinity/.venv/bin/activate
 infinity_emb v2 --model-id sentence-transformers/all-MiniLM-L6-v2 --port 8080 > infinity_emb.log 2>&1 &
 source .venv/bin/activate
 

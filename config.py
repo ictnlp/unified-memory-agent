@@ -30,8 +30,8 @@ API_CONFIG_LOCAL = {
 }
 MODEL_NAME = "Qwen/Qwen3-8B"
 
-load_hotpotqa_10_3_5 = partial(load_hotpotqa, num_docs=10, num_queries=3, num_samples=5)
-load_hotpotqa_200_1_128 = partial(load_hotpotqa, num_docs=200, num_queries=1, num_samples=128)
+load_hotpotqa_10_3_5 = partial(load_hotpotqa, num_docs=10)
+load_hotpotqa_200_1_128 = partial(load_hotpotqa, num_docs=200)
 _DATASET_LOADERS = BENCHMARK_REGISTRY.copy()
 _DATASET_LOADERS['hotpotqa'] = load_hotpotqa_200_1_128
 
@@ -41,10 +41,7 @@ class DatasetLoaders:
             return _DATASET_LOADERS[key]
         if key.startswith("hotpotqa_"):
             parts = key.split('_')
-            return partial(load_hotpotqa,
-                         num_docs=int(parts[1]),
-                         num_queries=int(parts[2]),
-                         num_samples=int(parts[3]))
+            return partial(load_hotpotqa, num_docs=int(parts[1]))
         if key.startswith("synth-"):
             parts = key.split('-')
             return partial(load_synth,
