@@ -57,3 +57,6 @@ build/
 !README.md
 !CONTRIBUTING.md
 !LICENSEdata/raw/longmemeval_s.json
+data/train/
+flash_attn*.whl*
+outputs/
