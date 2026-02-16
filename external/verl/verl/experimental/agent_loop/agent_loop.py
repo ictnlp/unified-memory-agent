@@ -353,7 +353,7 @@ class RewardManagerWorker:
         return {"reward_score": reward_score, "reward_extra_info": reward_extra_info}
 
 # DEBUG
-# @ray.remote
+@ray.remote
 class AgentLoopWorker:
     """Agent loop worker takes a batch of messages and run each message in an agent loop."""
 
@@ -826,13 +826,13 @@ class AgentLoopManager:
             # Round-robin scheduling over the all nodes
             node_id = node_ids[i % len(node_ids)]
             self.agent_loop_workers.append(
-                # AgentLoopWorker.options(
-                #     name=f"agent_loop_worker_{i}",
-                #     scheduling_strategy=ray.util.scheduling_strategies.NodeAffinitySchedulingStrategy(
-                #         node_id=node_id, soft=True
-                #     ),
-                # ).remote(self.config, self.server_handles, self.rm_executor)
-                AgentLoopWorker(self.config, self.server_handles, self.rm_executor)
+                AgentLoopWorker.options(
+                    name=f"agent_loop_worker_{i}",
+                    scheduling_strategy=ray.util.scheduling_strategies.NodeAffinitySchedulingStrategy(
+                        node_id=node_id, soft=True
+                    ),
+                ).remote(self.config, self.server_handles, self.rm_executor)
+                # AgentLoopWorker(self.config, self.server_handles, self.rm_executor)
             )
 
     def generate_sequences(self, prompts: DataProto, verbose: bool=True) -> DataProto:
@@ -853,8 +853,8 @@ class AgentLoopManager:
             self.wake_up()
         chunkes = prompts.chunk(len(self.agent_loop_workers))
         # chunkes = prompts.chunk(64)
-        agent_loop_worker = AgentLoopWorker(self.config, self.server_handles, self.rm_executor)
-        outputs = asyncio.run(agent_loop_worker.generate_sequences(chunkes[0], verbose=verbose))
+        # agent_loop_worker = AgentLoopWorker(self.config, self.server_handles, self.rm_executor)
+        # outputs = asyncio.run(agent_loop_worker.generate_sequences(chunkes[0], verbose=verbose))
 
         # outputs = ray.get(
         #     [

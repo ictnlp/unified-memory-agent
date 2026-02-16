@@ -234,11 +234,11 @@ class TaskRunner:
         """
         # Print the initial configuration. `resolve=True` will evaluate symbolic values.
         from pprint import pprint
-        import debugpy
-        debugpy.listen(("0.0.0.0", 5678))  # 监听所有 IP，端口可改 
-        print("  Waiting for debugger attach on port 5678...") 
-        debugpy.wait_for_client()  # 等待调试器连接 
-        debugpy.breakpoint()
+        # import debugpy
+        # debugpy.listen(("0.0.0.0", 5678))  # 监听所有 IP，端口可改 
+        # print("  Waiting for debugger attach on port 5678...") 
+        # debugpy.wait_for_client()  # 等待调试器连接 
+        # debugpy.breakpoint()
         from omegaconf import OmegaConf
 
         from verl.utils.fs import copy_to_local

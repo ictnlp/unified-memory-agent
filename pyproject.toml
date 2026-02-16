@@ -52,6 +52,8 @@ dependencies = [
     "json-repair>=0.57.1",
     "gpustat>=1.1.1",
     "rank-bm25>=0.2.2",
+    "sglang>=0.5.2",
+    "sgl-kernel>=0.3.21",
 ]
 
 [project.optional-dependencies]
@@ -93,3 +95,7 @@ version = {attr = "config.VERSION"}
 
 [tool.uv.sources]
 verl = { path = "external/verl", editable = true }
+
+[[tool.uv.index]]
+url = "https://mirrors.aliyun.com/pypi/simple"
+default = true

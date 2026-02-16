@@ -7,7 +7,7 @@ PROJECT_DIR="$(pwd)"
 CONFIG_PATH="$PROJECT_DIR/examples/sglang_multiturn/config"
 export VERL_LOGGING_LEVEL=DEBUG
 export EMBEDDING_SERVICE_ENDPOINT="http://localhost:8080/embeddings"
-export PROMPT_TEMPLATE_PATH="../../prompt_template.yaml"
+export PROMPT_TEMPLATE_PATH="prompt_template.yaml"
 
 python3 -m verl.trainer.main_ppo \
     +ray_kwargs.ray_init.runtime_env.env_vars.HF_HUB_OFFLINE=\"1\" \
@@ -40,7 +40,7 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
     actor_rollout_ref.rollout.over_sample_rate=0.1 \
     actor_rollout_ref.rollout.mode=async \
-    actor_rollout_ref.rollout.multi_turn.tool_config_path=./memagent/tool_config.yaml \
+    actor_rollout_ref.rollout.multi_turn.tool_config_path=external/verl/memagent/tool_config.yaml \
     actor_rollout_ref.rollout.multi_turn.max_user_turns=10 \
     actor_rollout_ref.rollout.multi_turn.max_assistant_turns=10 \
     actor_rollout_ref.rollout.multi_turn.max_parallel_calls=10 \
@@ -59,12 +59,12 @@ python3 -m verl.trainer.main_ppo \
     trainer.test_freq=10 \
     trainer.val_before_train=False \
     trainer.total_epochs=1 \
-    data.train_files="['../../data/train/hotpotqa-uma/train.parquet', \
-                        '../../data/train/ledger-qa-train/train.parquet', \
-                        '../../data/train/memalphafull-train/train.parquet']" \
-    data.val_files="['../../data/train/ledger-qa-train/dev.parquet', \
-                        '../../data/train/memalphafull-train/dev.parquet']" \
-    custom_reward_function.path=./memagent/hotpotqa.py \
+    data.train_files="['data/train/hotpotqa-uma/train.parquet', \
+                        'data/train/ledger-qa-train/train.parquet', \
+                        'data/train/memalphafull-train/train.parquet']" \
+    data.val_files="['data/train/ledger-qa-train/dev.parquet', \
+                        'data/train/memalphafull-train/dev.parquet']" \
+    custom_reward_function.path=external/verl/memagent/hotpotqa.py \
     custom_reward_function.name=reward_func $@
 
 # 在parquet数据里指定用哪个agent loop
