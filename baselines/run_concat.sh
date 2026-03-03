@@ -1,6 +1,7 @@
-TASKS="longmemeval locomo hotpotqa synth-ss2 synth-ss5 synth-ss10 synth-ss20 synth-ss30 synth-ss40 synth-ss50 banking77 booksum clinic msc nlu perltqa pubmed_rct trec_coarse trec_fine squad infbench convomem knowmebench"
+# TASKS="longmemeval locomo hotpotqa synth-ss2 synth-ss5 synth-ss10 synth-ss20 synth-ss30 synth-ss40 synth-ss50 banking77 booksum clinic msc nlu perltqa pubmed_rct trec_coarse trec_fine squad infbench convomem knowmebench"
+TASKS="synth-ss2"
 RESULTS_DIR="results"
-vllm serve Qwen/Qwen3-4B-Instruct-2507 -tp 4 -dp 2 --max-model-len 262144 --enable-chunked-prefill --max-num-batched-tokens 512 > vllm.log 2>&1 &
+VLLM_USE_FLASHINFER_SAMPLER=0 vllm serve Qwen/Qwen3-4B-Instruct-2507 -tp 4 -dp 2 --max-model-len 262144 --enable-chunked-prefill --max-num-batched-tokens 512 > vllm.log 2>&1 &
 
 until curl -s http://localhost:8000/health > /dev/null 2>&1; do
     sleep 2
@@ -20,5 +21,6 @@ do
         --task $TASK \
         --agent concat \
         --output_dir $RESULTS_DIR/$TASK \
-        --generate_only
+        --generate_only \
+        --force-overwrite
 done

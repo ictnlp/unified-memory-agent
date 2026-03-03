@@ -31,29 +31,59 @@ classifiers = [
 ]
 requires-python = ">=3.10"
 dependencies = [
+    # Core PyTorch (training version as baseline - REQUIRED for verl compatibility)
+    "torch==2.7.1",
+    "triton==3.3.1",
+    # Training dependencies (from verl/requirements.txt)
+    "verl",
+    "hydra-core>=1.3.0",
+    "accelerate>=1.2.1",
+    "datasets>=3.2.0",
+    "wandb>=0.19.1",
+    "tensorboard>=2.18.0",
+    # flash-attn requires manual install on CUDA 13.0 (see README for instructions)
+    # "flash-attn>=2.7.4",
+    "transformers",
+    "peft",
+    "tensordict>=0.8.0,<=0.10.0,!=0.9.0",
+    "torchdata",
+    "dill",
+    "liger-kernel",
+    "codetiming",
+    "pyarrow>=19.0.0",
+    "pybind11",
+    "pylatexenc",
+    "packaging>=20.0",
+    "uvicorn",
+    "fastapi",
+    "latex2sympy2_extended",
+    "math_verify",
+    # Inference dependencies (verl-compatible versions for PyTorch 2.7.1)
     "openai>=1.0.0",
-    "numpy>=1.26",
+    "sglang[srt,openai]==0.4.10.post2", # verl-specified version, compatible with torch 2.7.1
+    # Note: set VLLM_USE_FLASHINFER_SAMPLER=0 before running vllm serve
+    "vllm==0.10.1.1",
+    # Evaluation dependencies
+    "sentence-transformers",
+    "numpy>=1.26,<2.0.0", # Constrained by verl requirement
     "pandas",
-    "regex",
-    "python-dotenv",
-    "nltk",
     "rouge-score",
     "bert-score",
-    "sentence-transformers",
-    "backoff",
-    "prettytable",
-    "pydantic",
-    "datasets",
-    "scipy",
+    "rank-bm25>=0.2.2",
+    "python-dotenv",
     "uvloop",
+    "prettytable",
+    "regex",
+    "nltk",
+    "backoff",
+    "pydantic",
+    "scipy",
     "tqdm",
-    "verl",
-    "vllm>=0.14.0",
     "json-repair>=0.57.1",
     "gpustat>=1.1.1",
-    "rank-bm25>=0.2.2",
-    "sglang>=0.5.2",
-    "sgl-kernel>=0.3.21",
+    "opencv-python-headless>=4.10.0,<4.13.0", # Keep numpy<2.0.0 compatible for verl
+    "torch-memory-saver==0.0.9rc1",
+    "swanlab>=0.7.8",
 ]
 
 [project.optional-dependencies]
@@ -74,6 +104,10 @@ jupyter = [
     "jupyter",
     "ipywidgets",
 ]
+
+[[tool.uv.index]]
+url = "https://artifactory.ep.chehejia.com/artifactory/api/pypi/liauto-pypi-l5/simple"
+default = true
 
 [project.urls]
 "Homepage" = "https://github.com/deadpool66"
@@ -96,6 +130,25 @@ version = {attr = "config.VERSION"}
 [tool.uv.sources]
 verl = { path = "external/verl", editable = true }
 
-[[tool.uv.index]]
-url = "https://mirrors.aliyun.com/pypi/simple"
-default = true
+[tool.uv]
+environments = ["sys_platform == 'linux'"]
+prerelease = "allow"  # Allow pre-release packages (needed for flashinfer-python)
+# Force versions to match working env (sglang/vllm have conflicting pinned deps; vllm versions win)
+override-dependencies = [
+    "xgrammar==0.1.21",
+    "transformers==4.57.3",
+    "outlines-core==0.2.10",
+    "tokenizers==0.22.2",
+    "huggingface-hub==0.36.2",
+    "mistral-common==1.9.1",
+    "compressed-tensors==0.10.2",
+    "openai==2.24.0",
+    "pydantic==2.11.9",
+    "fastapi==0.117.1",
+    "starlette==0.48.0",
+    "uvicorn==0.37.0",
+    "msgspec==0.19.0",
+    "pillow==11.3.0",
+    "prometheus-client==0.23.1",
+    "prometheus-fastapi-instrumentator==7.1.0",
+]

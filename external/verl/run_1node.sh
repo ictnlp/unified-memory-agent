@@ -3,14 +3,28 @@
 set -x
 ulimit -n 65535
 
-PROJECT_DIR="$(pwd)"
-CONFIG_PATH="$PROJECT_DIR/examples/sglang_multiturn/config"
 export VERL_LOGGING_LEVEL=DEBUG
 export EMBEDDING_SERVICE_ENDPOINT="http://localhost:8080/embeddings"
 export PROMPT_TEMPLATE_PATH="prompt_template.yaml"
+export CUDA_HOME="${CUDA_HOME:-/usr/local/cuda}"
+export PATH="$CUDA_HOME/bin:$PATH"
+export LD_LIBRARY_PATH="$CUDA_HOME/lib64:${LD_LIBRARY_PATH:-}"
+export TRITON_PTXAS_PATH="${TRITON_PTXAS_PATH:-$CUDA_HOME/bin/ptxas}"
+export TRITON_PTXAS_BLACKWELL_PATH="${TRITON_PTXAS_BLACKWELL_PATH:-$CUDA_HOME/bin/ptxas}"
+export CUDA_LAUNCH_BLOCKING=1
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd -P)"
+cd "$PROJECT_ROOT"
+WORKING_DIR="$(pwd -P)"
+#     +ray_kwargs.ray_init.runtime_env.env_vars.HF_HUB_OFFLINE=\"1\" \
 python3 -m verl.trainer.main_ppo \
-    +ray_kwargs.ray_init.runtime_env.env_vars.HF_HUB_OFFLINE=\"1\" \
+    +ray_kwargs.ray_init.runtime_env.working_dir=\"$WORKING_DIR\" \
+    +ray_kwargs.ray_init.runtime_env.env_vars.CUDA_HOME=\"$CUDA_HOME\" \
+    +ray_kwargs.ray_init.runtime_env.env_vars.PATH=\"$PATH\" \
+    +ray_kwargs.ray_init.runtime_env.env_vars.LD_LIBRARY_PATH=\"$LD_LIBRARY_PATH\" \
+    +ray_kwargs.ray_init.runtime_env.env_vars.TRITON_PTXAS_PATH=\"$TRITON_PTXAS_PATH\" \
+    +ray_kwargs.ray_init.runtime_env.env_vars.TRITON_PTXAS_BLACKWELL_PATH=\"$TRITON_PTXAS_BLACKWELL_PATH\" \
     algorithm.adv_estimator=grpo \
     data.train_batch_size=32 \
     data.max_prompt_length=8192 \
@@ -59,12 +73,10 @@ python3 -m verl.trainer.main_ppo \
     trainer.test_freq=10 \
     trainer.val_before_train=False \
     trainer.total_epochs=1 \
-    data.train_files="['data/train/hotpotqa-uma/train.parquet', \
-                        'data/train/ledger-qa-train/train.parquet', \
-                        'data/train/memalphafull-train/train.parquet']" \
-    data.val_files="['data/train/ledger-qa-train/dev.parquet', \
-                        'data/train/memalphafull-train/dev.parquet']" \
+    data.train_files="['/workspace/data/train/hotpotqa-uma/train.parquet', \
+                        '/workspace/data/train/ledger-qa-train/train.parquet', \
+                        '/workspace/data/train/memalphafull-train/train.parquet']" \
+    data.val_files="['/workspace/data/train/ledger-qa-train/dev.parquet', \
+                        '/workspace/data/train/memalphafull-train/dev.parquet']" \
     custom_reward_function.path=external/verl/memagent/hotpotqa.py \
     custom_reward_function.name=reward_func $@
-
-# 在parquet数据里指定用哪个agent loop

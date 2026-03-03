@@ -2,6 +2,7 @@ __pycache__/
 processed*
 .env
 .venv/
+.venv.bak/
 *.parquet
 data/raw/*
 !data/raw/KnowMeBench/

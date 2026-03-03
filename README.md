@@ -8,25 +8,39 @@ This system evaluates how well AI agents can answer questions based on accumulat
 
 ## Installation
 
-This project requires setting up two separate Python environments to handle different dependencies.
-
 ### Prerequisites
 
 - Python 3.10+
 - [uv](https://docs.astral.sh/uv/) package installer (recommended for faster installs)
+- CUDA-capable GPU (for training and inference)
 
-### Environment 1: Main Project Environment
+### Main Environment Setup
+
+**All users (training + sglang inference + evaluation):**
 
 ```bash
 # Clone the repository
 git clone https://github.com/ictnlp/unified-memory-agent.git
 cd unified-memory-agent
 
+# Install all dependencies (training + sglang + vLLM inference)
 uv sync
 source .venv/bin/activate
+
+# CUDA 13.0 users: Apply one-time patch (REQUIRED)
+python patch_triton.py
+
+# All users: Apply SGLang offline mode patch (REQUIRED for HF_HUB_OFFLINE=1)
+python patch_sglang.py
+
+# All users: Install flash-attn prebuilt wheel (avoids CUDA version checks)
+# Download from: https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.0.post2/flash_attn-2.8.0.post2+cu12torch2.7cxx11abiFALSE-cp312-cp312-linux_x86_64.whl
+uv pip install flash_attn-2.8.0.post2+cu12torch2.7cxx11abiFALSE-cp312-cp312-linux_x86_64.whl
 ```
 
-### Environment 2: Infinity_emb Environment
+> **Note**: This installs training (verl, ray), sglang inference, and vLLM inference dependencies in a single environment based on PyTorch 2.7.1. `flash-attn` must be installed manually via the prebuilt wheel above (compiled for CUDA 12.x + torch 2.7 + Python 3.12). If you're using CUDA 13.0, run `python patch_triton.py` to add Triton CUDA 13.0 support. **All users** must run `python patch_sglang.py` to fix SGLang's offline mode handling (allows training with `HF_HUB_OFFLINE=1`).
+
+### Embedding Service Setup (Required for all users)
 
 ```bash
 # Navigate to infinity_emb directory
@@ -43,26 +57,52 @@ uv pip install -e ".[all]"
 cd ../../../..
 ```
 
+> **Note**: The infinity embedding service runs in a separate environment to avoid conflicts with transformers versions.
+
+### Environment Overview
+
+| Environment | Location | Purpose | Dependencies |
+|-------------|----------|---------|--------------|
+| **Main** | `.venv/` | Training + SGLang + vLLM Inference + Evaluation | PyTorch 2.7.1, verl, ray, flash-attn, sglang 0.4.10, vllm 0.10+ |
+| **Infinity** | `external/infinity/libs/infinity_emb/.venv/` | Embedding service | sentence-transformers |
+
+**Disk Space Requirements:**
+- Main environment: ~25 GB (training + sglang + vllm)
+- Infinity: ~5 GB
+
 ## Quick Start
-Deploy
+
+### Deploy Services
+
 ```bash
+# Option 1: Using SGLang (main environment)
 source .venv/bin/activate
-vllm serve $MODEL -dp 2 -tp 4 --gpu-memory-utilization 0.8 --enforce-eager > vllm.log 2>&1 &
-source ./external/infinity/.venv/bin/activate
+sglang serve $MODEL --tp 4 --gpu-memory-utilization 0.8 > sglang.log 2>&1 &
+
+# Option 2: Using vLLM (main environment)
+source .venv/bin/activate
+VLLM_USE_FLASHINFER_SAMPLER=0 vllm serve $MODEL -dp 2 -tp 4 --gpu-memory-utilization 0.8 --enforce-eager > vllm.log 2>&1 &
+
+# Start embedding service (in separate terminal)
+source ./external/infinity/libs/infinity_emb/.venv/bin/activate
 infinity_emb v2 --model-id sentence-transformers/all-MiniLM-L6-v2 --port 8080 > infinity_emb.log 2>&1 &
-# Wait for server
+
+# Wait for servers
 until curl -s http://localhost:8080/health > /dev/null 2>&1; do
     sleep 2
-    echo "wait for server port 8080..."
+    echo "wait for embedding server port 8080..."
 done
 until curl -s http://localhost:8000/health > /dev/null 2>&1; do
     sleep 2
-    echo "wait for server port 8000..."
+    echo "wait for inference server port 8000..."
 done
 ```
 
-Run Demo
+### Run Demo
+
 ```bash
+# Use main environment for demo
+source .venv/bin/activate
 python test_verl_agent.py
 ```
 
@@ -180,19 +220,22 @@ done
 ```
 
 ### Start Training
-Single node
+
+**Prerequisites**: Main environment must be installed with patch applied (if using CUDA 13.0)
+
+**Single node training:**
 ```bash
 source .venv/bin/activate
-cd external/verl
-bash run_1node.sh
+bash external/verl/run_1node.sh
 ```
 
-4 nodes
+**4 nodes training:**
 ```bash
 source .venv/bin/activate
-cd external/verl
-bash run_4nodes.sh
+bash external/verl/run_4nodes.sh
 ```
+
+> **Note**: Training uses PyTorch 2.7.1 with Triton 3.3.1 (CUDA 13.0 patched for compatibility)
 ## Extending the System
 
 ### Adding New Agents
