@@ -106,7 +106,7 @@ jupyter = [
 ]
 
 [[tool.uv.index]]
-url = "https://artifactory.ep.chehejia.com/artifactory/api/pypi/liauto-pypi-l5/simple"
+url = "https://mirrors.aliyun.com/pypi/simple"
 default = true
 
 [project.urls]

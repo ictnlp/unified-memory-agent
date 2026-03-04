@@ -580,7 +580,8 @@ async def generate_responses_async(task, agent_class, agent_config, agent_id, ou
     final_output_file = f"{output_dir}/responses_{agent_id}.jsonl"
 
     # Check for existing partial results
-    completed_qids = set()
+    completed_qids = []
+    completed = []
     if force_overwrite:
         if os.path.exists(final_output_file):
             try:
@@ -593,12 +594,22 @@ async def generate_responses_async(task, agent_class, agent_config, agent_id, ou
     elif os.path.exists(final_output_file):
         print(f"Found existing output file: {final_output_file}")
         with open(final_output_file, 'r', encoding='utf-8') as f:
+            num_lines = 0
             for line in f:
                 try:
                     result = json.loads(line)
-                    completed_qids.add(result['qid'])
+                    num_lines += 1
+                    if not result["response"].startswith("ERROR"):
+                        if result['qid'] not in completed_qids:
+                            completed_qids.append(result['qid'])
+                            completed.append(result)
                 except:
                     continue
+            if num_lines > len(completed_qids):
+                print(f"Warning: {num_lines - len(completed_qids)} lines in existing file could not be parsed or were errors, refreshing the file.")
+                with open(final_output_file, 'w', encoding='utf-8') as f:
+                    for result in completed:
+                        f.write(json.dumps(result, ensure_ascii=False) + '\n')
         print(f"Found {len(completed_qids)} already completed questions")
     
     # Filter out completed samples
@@ -897,7 +908,7 @@ def get_args():
                         help='Output directory (default: results/{task})')
     parser.add_argument('--concurrency', type=int, default=50,
                         help='Number of concurrent tasks (default: 50)')
-    parser.add_argument('--generate_only', action='store_true', help='Generate Only mode')
+    parser.add_argument('--generate-only', action='store_true', help='Generate Only mode')
     parser.add_argument('--force-overwrite', action='store_true',
                         help='Re-evaluate all responses and overwrite existing evaluated files')
     return parser.parse_args()

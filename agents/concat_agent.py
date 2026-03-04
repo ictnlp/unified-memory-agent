@@ -44,6 +44,10 @@ class ConcatAgent(BaseAgent):
     ) -> str:
         try:
             context = "\n".join(self.memory)
+            context_available_chars = 49152 - (1024 * 3) - len(query) - 100
+            if len(context) > context_available_chars:
+                print(f"[WARNING] Context too long ({len(context)} chars), truncating to {context_available_chars} chars (keeping recent memory)")
+                context = "...[Earlier memory truncated]...\n\n" + context[-context_available_chars:]
             prompt = f"Your memory:\n{context}\n\n{QA_PROMPT.format(query)}"
             
             model = MODEL_NAME_MAP.get(self.model_name, self.model_name)

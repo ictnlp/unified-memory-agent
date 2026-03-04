@@ -57,7 +57,9 @@ build/
 !requirements.txt
 !README.md
 !CONTRIBUTING.md
-!LICENSEdata/raw/longmemeval_s.json
+!LICENSE
+demo.ipynb
+data/raw/longmemeval_s.json
 data/train/
 flash_attn*.whl*
 outputs/
