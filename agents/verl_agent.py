@@ -10,7 +10,7 @@ from openai import OpenAI, AsyncOpenAI, RateLimitError
 from omegaconf import OmegaConf
 from transformers import AutoTokenizer
 import os
-from .base_agent import BaseAgent, MODEL_NAME_MAP
+from .base_agent import BaseAgent
 
 # Path constants
 PROJECT_ROOT = Path(__file__).resolve().parents[1]  # unified-memory-agent root
@@ -128,7 +128,7 @@ class VerlMemoryAgent(BaseAgent):
         else:
             super().__init__(client=client, model_name=model_name)
         self._is_async = hasattr(self.client, "__class__") and "Async" in self.client.__class__.__name__
-        self._resolved_model = MODEL_NAME_MAP.get(self.model_name, self.model_name)
+        self._resolved_model = self.model_name
         self._tokenizer = AutoTokenizer.from_pretrained(self._resolved_model, fix_mistral_regex=True)
         self._config = self._build_config()
         ToolMemoryAgentLoop.init_class(self._config, self._tokenizer, None)

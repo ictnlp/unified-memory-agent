@@ -1,7 +1,7 @@
 import asyncio
 import json
 from openai import RateLimitError
-from .base_agent import BaseAgent, MODEL_NAME_MAP
+from .base_agent import BaseAgent
 from typing import List, Union
 import tqdm
 from tqdm.asyncio import tqdm_asyncio
@@ -264,7 +264,7 @@ Your answer:
     async def _make_request_async(self, messages: List[dict], max_tokens: int = 1024, temperature: float = 0.0):
         """Make async API request with retry logic"""
         response = await self.client.chat.completions.create(
-            model=MODEL_NAME_MAP.get(self.model_name, self.model_name),
+            model=self.model_name,
             messages=messages,
             max_tokens=max_tokens,
             temperature=temperature

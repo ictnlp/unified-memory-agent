@@ -12,7 +12,7 @@ from typing import List, Dict, Any, Optional
 from openai import AsyncOpenAI
 import shutil
 
-from .base_agent import BaseAgent, MODEL_NAME_MAP
+from .base_agent import BaseAgent
 
 # Import GAM components (path managed by agents/__init__.py)
 try:
@@ -198,7 +198,7 @@ class GAMAgent(BaseAgent):
     def _init_gam_components(self):
         """初始化 GAM 框架的各个组件"""
         # 1. 映射模型名称
-        gam_model_name = MODEL_NAME_MAP.get(self.model_name, self.model_name)
+        gam_model_name = self.model_name
 
         # 2. 创建 Generator wrapper
         self.generator = AsyncOpenAIGeneratorWrapper(

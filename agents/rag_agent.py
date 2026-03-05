@@ -15,7 +15,7 @@ from openai import OpenAI, AsyncOpenAI
 from tqdm.asyncio import tqdm_asyncio
 from rank_bm25 import BM25Okapi
 
-from .base_agent import BaseAgent, MODEL_NAME_MAP
+from .base_agent import BaseAgent
 
 def get_chunks(context_text, chunk_size):
     separator = "\n"
@@ -328,7 +328,7 @@ class RAGAgent(BaseAgent):
 
         try:
             response = await self.client.chat.completions.create(
-                model=MODEL_NAME_MAP.get(self.model_name, self.model_name),
+                model=self.model_name,
                 messages=[{"role": "system", "content": answer_prompt}],
                 temperature=0.0,
                 max_tokens=1024

@@ -7,7 +7,7 @@ import re
 from typing import List, Dict, Any
 from pathlib import Path
 
-from ..base_agent import BaseAgent, MODEL_NAME_MAP
+from ..base_agent import BaseAgent
 from .combined_processor import CombinedProcessor
 from .suggestions_processor import SuggestionsProcessor
 from .memory_update_processor import MemoryUpdateProcessor
@@ -381,7 +381,7 @@ Question: {query}
 
 Based on the above information, please provide a comprehensive and accurate answer to the question. If the information is insufficient, please indicate what additional information would be needed."""
 
-            model = MODEL_NAME_MAP.get(self.model_name, self.model_name)
+            model = self.model_name
             response = self.client.chat.completions.create(
                 model=model,
                 messages=[{"role": "user", "content": qa_prompt}],

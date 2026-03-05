@@ -1,7 +1,7 @@
 from typing import List
 import json
 import inspect
-from .base_agent import BaseAgent, MODEL_NAME_MAP
+from .base_agent import BaseAgent
 
 QA_PROMPT = """
 Based on your memory, write an answer in the form of a short phrase or a lowercase option for the following question. If it is a multiple-choice question, please respond with the lowercase option only (e.g. 'a'). Otherwise, answer with exact words from the context whenever possible.
@@ -50,7 +50,7 @@ class ConcatAgent(BaseAgent):
                 context = "...[Earlier memory truncated]...\n\n" + context[-context_available_chars:]
             prompt = f"Your memory:\n{context}\n\n{QA_PROMPT.format(query)}"
             
-            model = MODEL_NAME_MAP.get(self.model_name, self.model_name)
+            model = self.model_name
             response = await self.client.chat.completions.create(
                 model=model,
                 messages=[
@@ -105,7 +105,7 @@ class ConcatAgent(BaseAgent):
 
             prompt = f"Your memory:\n{context_truncated}\n\n{query_part}"
 
-            model = MODEL_NAME_MAP.get(self.model_name, self.model_name)
+            model = self.model_name
             retries = 0
             reformat_response = None  # Initialize to None
             while retries < 5:

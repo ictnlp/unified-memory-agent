@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 from typing import List
 
-from .base_agent import BaseAgent, MODEL_NAME_MAP
+from .base_agent import BaseAgent
 
 # Ensure external/A-mem is importable
 A_MEM_PATH = Path(__file__).parents[1] / "external" / "A-mem"
@@ -52,7 +52,7 @@ class AmemAgent(BaseAgent):
         max_concurrent: int = 10,
     ):
         super().__init__(client, model_name)
-        self.llm_model = MODEL_NAME_MAP.get(model_name, model_name)
+        self.llm_model = model_name
         self.backend = backend
         self.retrieve_k = retrieve_k
         self.temperature_c5 = temperature_c5

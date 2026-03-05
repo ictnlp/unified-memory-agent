@@ -6,13 +6,6 @@ from dotenv import load_dotenv
 load_dotenv(".env") # 默认会找项目根目录的 .env
 import os
 
-
-MODEL_NAME_MAP = {
-    "gpt4.1": "azure-gpt-4_1",
-    "qwen3-8b": "Qwen/Qwen3-8B",
-    "qwen3-4b": "Qwen/Qwen3-4B-Instruct-2507",
-}
-
 class BaseAgent:
     def __init__(
         self,

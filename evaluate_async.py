@@ -485,7 +485,7 @@ def load_dataset(task: str, force_rebuild: bool = False):
         raise ValueError(f"Unknown task: {task}")
     return DATASET_LOADERS[task](force_rebuild=force_rebuild)
 
-async def process_single_sample(sample, agent_class, agent_kwargs, output_file, task, semaphore, write_lock):
+async def process_single_sample(sample, agent_class, agent_kwargs, output_file, semaphore, write_lock):
     """Process a single sample asynchronously"""
     async with semaphore:
         print(f"{agent_class.__name__} Processing sample: {sample.task_id}")
@@ -564,7 +564,7 @@ async def process_single_sample(sample, agent_class, agent_kwargs, output_file, 
         
         return len(results)
 
-async def generate_responses_async(task, agent_class, agent_config, agent_id, output_dir, concurrency=32, model_name='qwen3-4b', force_overwrite=False):
+async def generate_responses_async(task, agent_class, agent_config, agent_id, output_dir, concurrency, model_name, force_overwrite):
     """Generate responses using specified agent with async concurrency
 
     Args:
@@ -664,7 +664,7 @@ async def generate_responses_async(task, agent_class, agent_config, agent_id, ou
             # Other agents (ConcatAgent, EmergenceAgent) use model_name
             agent_kwargs = {'model_name': model_name, 'client': client}
 
-        task_coroutine = process_single_sample(sample, agent_class, agent_kwargs, final_output_file, task, semaphore, write_lock)
+        task_coroutine = process_single_sample(sample, agent_class, agent_kwargs, final_output_file, semaphore, write_lock)
         tasks.append(task_coroutine)
     
     # Process all tasks concurrently with progress bar
@@ -900,8 +900,8 @@ def get_args():
     default_prompts_cfg = str(default_prompts_cfg_path) if default_prompts_cfg_path.exists() else None
     parser.add_argument('--prompts_config_path', type=str, default=default_prompts_cfg,
                         help='Optional prompts configuration file for memalpha agent')
-    parser.add_argument('--model', type=str, default='qwen3-4b',
-                        help='Model name to use (default: qwen3-4b)')
+    parser.add_argument('--model', type=str, default='Qwen/Qwen3-4B-Instruct',
+                        help='Model name to use (default: Qwen/Qwen3-4B-Instruct)')
     parser.add_argument('--input_file', type=str, default=None,
                         help='Input file for evaluation only (JSONL format)')
     parser.add_argument('--output_dir', type=str, default=None,

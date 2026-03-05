@@ -21,6 +21,6 @@ do
         --agent concat \
         --model Qwen/Qwen3.5-4B \
         --output_dir $RESULTS_DIR/$TASK \
-        --generate-only \
-        --force-overwrite
+        --concurrency 1 \
+        --generate-only
 done

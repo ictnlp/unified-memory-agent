@@ -9,7 +9,7 @@ from typing import List, Dict, Any
 from sentence_transformers import SentenceTransformer, util
 from openai import OpenAI
 
-from .base_agent import BaseAgent, MODEL_NAME_MAP
+from .base_agent import BaseAgent
 
 
 class EmergenceAgent(BaseAgent):
@@ -192,7 +192,7 @@ class EmergenceAgent(BaseAgent):
         
         try:
             facts = self.client.chat.completions.create(
-                model=MODEL_NAME_MAP.get(self.model_name, self.model_name),
+                model=self.model_name,
                 messages=[{"role": "system", "content": summary_prompt}],
                 temperature=0.0,
                 max_tokens=512
@@ -221,7 +221,7 @@ class EmergenceAgent(BaseAgent):
         
         try:
             answer = self.client.chat.completions.create(
-                model=MODEL_NAME_MAP.get(self.model_name, self.model_name), 
+                model=self.model_name, 
                 messages=[{"role": "system", "content": answer_prompt}],
                 temperature=0.0,
                 max_tokens=256
@@ -337,7 +337,7 @@ class EmergenceAgent(BaseAgent):
         
         try:
             response = await self.client.chat.completions.create(
-                model=MODEL_NAME_MAP.get(self.model_name, self.model_name),
+                model=self.model_name,
                 messages=[{"role": "system", "content": summary_prompt}],
                 temperature=0.0,
                 max_tokens=512
@@ -365,7 +365,7 @@ class EmergenceAgent(BaseAgent):
         
         try:
             response = await self.client.chat.completions.create(
-                model=MODEL_NAME_MAP.get(self.model_name, self.model_name),
+                model=self.model_name,
                 messages=[{"role": "system", "content": answer_prompt}],
                 temperature=0.0,
                 max_tokens=256

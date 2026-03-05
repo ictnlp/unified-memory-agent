@@ -32,6 +32,7 @@ tool_stats*
 analyze_tool_stats.py
 run_evaluation_full.sh
 run_generation.sh
+run_test.sh
 
 # Abandoned solutions
 agents/file_memory_agent/

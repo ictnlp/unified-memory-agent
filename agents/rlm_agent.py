@@ -1,5 +1,5 @@
 from typing import List, Optional
-from .base_agent import BaseAgent, MODEL_NAME_MAP
+from .base_agent import BaseAgent
 from pathlib import Path
 from uuid import uuid4
 import json
@@ -27,7 +27,7 @@ class RLMAgent(BaseAgent):
         # Accumulate memory chunks for RLM context construction
         self.memory_chunks: List[str] = []
         self._rlm: Optional[RLM_REPL] = None
-        self.model_name = MODEL_NAME_MAP.get(model_name, model_name)
+        self.model_name = model_name
         self.recursive_model = self.model_name
         self.max_iterations = max_iterations
         self.enable_logging = enable_logging
