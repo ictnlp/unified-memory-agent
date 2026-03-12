@@ -24,6 +24,7 @@ diagnose_*.py
 deduplicate_*.py
 test_*.py
 !external/A-mem/test_advanced.py
+!test_verl_agent.py
 stats.txt
 check_*.py
 TODO
