@@ -596,9 +596,9 @@ async def generate_responses_async(task, agent_class, agent_config, agent_id, ou
         with open(final_output_file, 'r', encoding='utf-8') as f:
             num_lines = 0
             for line in f:
+                num_lines += 1
                 try:
                     result = json.loads(line)
-                    num_lines += 1
                     if not result["response"].startswith("ERROR"):
                         if result['qid'] not in completed_qids:
                             completed_qids.append(result['qid'])
@@ -755,6 +755,7 @@ async def evaluate_responses_async(input_file, task, output_dir, agent_id="unkno
 
     # Collect existing valid metrics to avoid recomputing expensive metrics
     existing_metrics_map = {}  # {qid: {metric_name: value}}
+    evaluated_qids = set()  # Track qids that have been evaluated with all expected metrics
 
     # Check for existing partial results
     if force_overwrite:
@@ -800,6 +801,10 @@ async def evaluate_responses_async(input_file, task, output_dir, agent_id="unkno
                         print(f"Found incomplete metrics for qid {qid}: missing/invalid {missing_metrics}")
                     needs_rerun = True
                     # Don't break - continue collecting valid metrics
+                else:
+                    # This qid has all expected metrics, mark as completed
+                    if qid:
+                        evaluated_qids.add(qid)
 
         # Check if the number of evaluated responses matches the number of input responses
         if evaluated_count != len(responses):
@@ -809,16 +814,36 @@ async def evaluate_responses_async(input_file, task, output_dir, agent_id="unkno
         if needs_rerun:
             if existing_metrics_map:
                 print(f"Found valid expensive metrics for {len(existing_metrics_map)} questions, will reuse them")
-            # Don't delete the file anymore - we'll overwrite with new results
+            # Read existing complete results to preserve them
+            existing_results = []
+            with open(results_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    try:
+                        result = json.loads(line)
+                        qid = result.get('qid')
+                        # Only keep complete results (those in evaluated_qids)
+                        if qid in evaluated_qids:
+                            existing_results.append(result)
+                    except json.JSONDecodeError:
+                        pass
+
+            # Write back only the complete results (will overwrite the file)
+            with open(results_file, 'w', encoding='utf-8') as f:
+                for result in existing_results:
+                    f.write(json.dumps(result, ensure_ascii=False) + '\n')
+            print(f"Preserved {len(existing_results)} complete results, will evaluate remaining {len(responses) - len(evaluated_qids)} items")
         else:
             print("All responses already evaluated with complete metrics. Skipping re-evaluation")
             return
-    
-    if not responses:
-        print("No responses found for evaluation")
+
+    # Filter out already evaluated responses to avoid duplicates
+    remaining_responses = [item for item in responses if item.get('qid') not in evaluated_qids]
+
+    if not remaining_responses:
+        print("All responses already evaluated. Nothing to do.")
         return
 
-    print(f"Evaluating {len(responses)} responses with concurrency {concurrency}")
+    print(f"Evaluating {len(remaining_responses)} remaining responses (skipping {len(evaluated_qids)} already completed) with concurrency {concurrency}")
     
     # Create evaluator and semaphore
     try:
@@ -835,10 +860,10 @@ async def evaluate_responses_async(input_file, task, output_dir, agent_id="unkno
     semaphore = asyncio.Semaphore(concurrency)
     write_lock = asyncio.Lock()
 
-    # Create tasks for all evaluations
+    # Create tasks for remaining evaluations only
     tasks = [
         evaluate_single_response(item, evaluator, results_file, semaphore, write_lock, existing_metrics_map)
-        for item in responses
+        for item in remaining_responses
     ]
     
     # Process all tasks concurrently with progress bar

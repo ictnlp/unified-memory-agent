@@ -21,6 +21,39 @@ sys.path.append('.')
 from config import DATASET_LOADERS
 
 
+TASK_DISPLAY_NAMES = {
+    'banking77': 'Bank77',
+    'clinic': 'Clinic',
+    'nlu': 'NLU',
+    'pubmed_rct': 'Pub',
+    'trec_coarse': 'T-C',
+    'trec_fine': 'T-F',
+    'convomem': 'Convo',
+    'hotpotqa': 'Hotpot',
+    'locomo': 'LoCo',
+    'longmemeval': 'LME',
+    'msc': 'MSC',
+    'perltqa': 'Perl',
+    'squad': 'SQuAD',
+}
+
+PREFERRED_SUMMARY_TASK_ORDER = [
+    'banking77',
+    'clinic',
+    'nlu',
+    'pubmed_rct',
+    'trec_coarse',
+    'trec_fine',
+    'convomem',
+    'hotpotqa',
+    'locomo',
+    'longmemeval',
+    'msc',
+    'perltqa',
+    'squad',
+]
+
+
 def _extract_agent_name(filename: str, prefix: str) -> str:
     """Extract the agent name from filenames like prefix_agent[_timestamp].jsonl."""
     base = filename
@@ -339,10 +372,10 @@ def generate_summary_table(summary_scores: Dict[str, Dict[str, float]],
     if not summary_scores:
         return None
 
-    sorted_tasks = sorted(tasks)
+    sorted_tasks = sort_summary_tasks(tasks)
     table = PrettyTable()
     table.title = title
-    table.field_names = ['Agent'] + [task.upper() for task in sorted_tasks] + ['AVG']
+    table.field_names = ['Agent'] + [TASK_DISPLAY_NAMES.get(task, task.upper()) for task in sorted_tasks] + ['Avg']
 
     # Find max value for each task (column) excluding -1 and None
     max_values_by_task = {}
@@ -400,10 +433,10 @@ def generate_response_presence_table(presence: Dict[str, Dict[str, bool]], tasks
     if not presence:
         return None
 
-    sorted_tasks = sorted(tasks)
+    sorted_tasks = sort_summary_tasks(tasks)
     table = PrettyTable()
     table.title = "Response File Availability"
-    table.field_names = ['Agent'] + [task.upper() for task in sorted_tasks]
+    table.field_names = ['Agent'] + [TASK_DISPLAY_NAMES.get(task, task.upper()) for task in sorted_tasks]
 
     for agent in sorted(presence.keys()):
         row = [agent]
@@ -431,6 +464,14 @@ def extract_session_count(task_name: str) -> Optional[int]:
     if match:
         return int(match.group(1))
     return None
+
+
+def sort_summary_tasks(tasks: List[str]) -> List[str]:
+    """Sort tasks using a preferred benchmark order, then append any remaining tasks."""
+    unique_tasks = list(dict.fromkeys(tasks))
+    preferred_tasks = [task for task in PREFERRED_SUMMARY_TASK_ORDER if task in unique_tasks]
+    remaining_tasks = sorted(task for task in unique_tasks if task not in PREFERRED_SUMMARY_TASK_ORDER)
+    return preferred_tasks + remaining_tasks
 
 
 def plot_session_scaling(summary_scores: Dict[str, Dict[str, float]],
@@ -478,6 +519,7 @@ def plot_session_scaling(summary_scores: Dict[str, Dict[str, float]],
         'memalphav1': 'MemAlpha',
         'toolmem90v4continualv2promptv2': 'UMA',
         'toolmem20synth': 'UMA',
+        'amem': 'A-MEM'
     }
 
     # Plot each agent's curve
