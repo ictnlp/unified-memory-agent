@@ -11,17 +11,30 @@
 cd /mnt/pfs-guan-ssai/nlu/zhangkehao/unified
 source ./.venv/bin/activate
 ```
-2. 读取以下文件以获得完整上下文：
+2. 先检查 embedding 服务。
+   - 优先检查 `http://localhost:8080/health` 是否可用。
+   - 如果服务已经存在，则直接跳过，不要重复启动。
+   - 如果服务不存在，则按照 `run_generation.sh` 里注释掉的那条命令启动，并先切换到对应虚拟环境：
+```bash
+source external/infinity/libs/infinity_emb/.venv/bin/activate
+infinity_emb v2 --model-id sentence-transformers/all-MiniLM-L6-v2 --port 8080 > infinity_emb.log 2>&1 &
+```
+   - 启动完 embedding 服务后，再切回本项目虚拟环境：
+```bash
+source ./.venv/bin/activate
+```
+3. 读取以下文件以获得完整上下文：
    - `run_generation.sh`
    - `run_score.sh`
    - `prompt_template.yaml`
    - `external/verl/memagent/hotpotqa.py`
    - `external/verl/memagent/tool_config.yaml`
-3. 先核对 `run_generation.sh` 里的 `PROMPT_TEMPLATE_PATH`。版本控制的目标文件必须是脚本实际读取的 prompt 文件，而不是名字看起来像对的文件。当前脚本如果指向别处，则以脚本里的真实路径为准；如果你本来想优化 `./prompt_template.yaml`，那就先让人工确认路径策略。
-4. 只允许修改“脚本实际读取的那个 prompt 文件”。不要改动其它代码、脚本、工具定义和评测逻辑。
-5. 初始化两个本地记录文件：
+4. 先核对 `run_generation.sh` 里的 `PROMPT_TEMPLATE_PATH`。版本控制的目标文件必须是脚本实际读取的 prompt 文件，而不是名字看起来像对的文件。当前脚本如果指向别处，则以脚本里的真实路径为准；如果你本来想优化 `./prompt_template.yaml`，那就先让人工确认路径策略。
+5. 只允许修改“脚本实际读取的那个 prompt 文件”。不要改动其它代码、脚本、工具定义和评测逻辑。
+6. 检查两个本地记录文件：
    - `prompt_results.tsv`
    - `best_run.txt`
+   如果不存在，则在第一次运行时创建；如果已经存在，则说明这不是第一次运行，应当进入 resume 流程，而不是重做基线。
 
 ## 版本控制原则
 
@@ -99,7 +112,19 @@ run_id	parent_run	accuracy	status	description
 
 ## 实验循环
 
-第一次运行必须始终是基线：
+先判断这是首次运行还是继续运行。
+
+一旦进入实验循环，不要在完成一次基线或一次改进后退出。除非遇到明确阻塞条件，否则必须持续进行“分析 -> 修改 prompt -> 生成 -> 评测 -> 归档 -> 记录 -> 进入下一轮”的循环，直到被人工手动停止。
+
+### 首次运行
+
+满足以下条件时，视为首次运行：
+
+- `best_run.txt` 不存在
+- `prompt_results.tsv` 不存在
+- `tmp/prompt_runs/` 不存在，或者目录为空
+
+首次运行必须始终是基线：
 
 1. 保持当前“脚本实际读取的 prompt 文件”不变，直接运行一次基线。
 2. 运行生成：
@@ -114,8 +139,28 @@ bash run_score.sh
 5. 将当前 prompt、`ANALYSIS.md` 和结果文件归档到 `tmp/prompt_runs/<RUN_ID>/`。
 6. 统计 `llm_score` 准确率，写入 `prompt_results.tsv`。
 7. 把该 `run_id` 写入 `best_run.txt`。
+8. 基线完成后不要退出，立即进入下面的“持续迭代”流程。
 
-之后进入无限循环：
+### Resume
+
+满足以下任一条件时，优先视为 resume：
+
+- `best_run.txt` 已存在
+- `prompt_results.tsv` 已存在
+- `tmp/prompt_runs/` 下已经有历史运行目录
+
+resume 时不要重做基线，而是从当前最优实验继续：
+
+1. 读取 `best_run.txt`，得到 `<best_run>`。
+2. 检查 `tmp/prompt_runs/<best_run>/` 是否存在。
+3. 如果该目录存在，则将 prompt 文件恢复到该目录中的快照：
+```bash
+cp "tmp/prompt_runs/<best_run>/prompt_template.yaml" "$PROMPT_FILE"
+```
+4. 如果 `best_run.txt` 丢失，但 `tmp/prompt_runs/` 下有历史目录，则从 `prompt_results.tsv` 中找最后一个 `status=keep` 的 `run_id`，写回 `best_run.txt`，然后继续。
+5. 如果 `best_run.txt` 和 `prompt_results.tsv` 都丢失，但 `tmp/prompt_runs/` 还在，则暂停自动迭代，先人工确认应该从哪个历史目录恢复。
+
+之后进入持续迭代：
 
 1. 读取 `best_run.txt`，将 prompt 文件恢复到当前最优实验对应的快照：
 ```bash
@@ -134,6 +179,18 @@ cp "tmp/prompt_runs/<best_run>/prompt_template.yaml" "$PROMPT_FILE"
    - 将该轮记为 `discard`
    - 下一轮开始前仅恢复 prompt 文件回到最优版本
 10. 如果运行失败、输出缺失或评测崩溃，则记为 `crash`，准确率填 `0.0000`，然后回到最优 prompt 继续。
+11. 无论本轮结果是 `keep`、`discard` 还是 `crash`，都不要退出；应当继续开始下一轮。
+
+### 停止条件
+
+只有以下情况允许停止：
+
+- 人工明确要求停止
+- 缺少必要输入文件，且无法从现有归档恢复
+- 关键依赖服务无法启动，例如 embedding 服务或 vLLM 连续多次启动失败
+- 连续多轮都因同一个基础设施问题崩溃，继续重试没有意义
+
+除上述情况外，不要输出总结后退出，不要在完成基线后退出，也不要在完成某一轮改进后等待人工确认。
 
 ## 为什么使用时间前缀归档
 
