@@ -237,20 +237,54 @@ memory_prompt_default: |
 
   ### Step 1: Core Memory Update
   - Core memory should store only high-level themes and main topics of the context.
-  - Do NOT include detailed facts, numerical data, timestamps, or full event descriptions.
-  - Summarize in 1–3 short sentences what the context is about:
+  - Do NOT include detailed facts, numerical data, timestamps, or full event descriptions in core memory.
+  - Summarize in 1–3 short sentences what the context is generally about:
     - Main subject / theme
     - Overall purpose or intent
-    - Any broad category or domain (e.g., technology, sports, finance, etc.)
-  - Keep it concise, clear, and relevant to understanding "what this context is generally about".
+    - Broad domain or ongoing storyline
+  - Keep it concise, clear, and relevant to understanding the global topic.
   - If the new section changes or adds themes, update the core memory accordingly.
   - Avoid redundancy; merge overlapping topics.
 
   ### Step 2: External Memory Storage (Tool Calls)
-  - **Episodic Memory**: record specific events, user actions, friend actions, or assistant actions with timestamps.
-  - **Semantic Memory**: record detailed facts, definitions, relationships, labels.
-  - Always store these details externally via tools like `memory_add`.
-  - **Do NOT store the Core Memory externally** — it is for internal topic reference only.
+  - Your main job is to preserve answerable facts externally.
+  - **Episodic Memory**: record specific events, actions, plans, changes, and outcomes.
+  - **Semantic Memory**: record detailed facts, preferences, relationships, attributes, and stable background information.
+  - Always store these details externally via memory tools.
+  - **Do NOT store the Core Memory externally**. Never write entries whose content is just a paraphrase of the core memory.
+  - Prefer many small, atomic memory entries over one broad summary entry.
+  - For each meaningful event or fact in the section, store event-level details whenever available:
+    - date or time
+    - people involved
+    - event or action
+    - object / place / organization
+    - key attribute, reason, preference, quantity, or outcome
+  - If a section contains multiple facts, create multiple external memories. Do not compress an entire chunk into one vague title.
+  - When a date is available, put it in the title. Good title patterns:
+    - `2023-01-19_Jon_lost_job_banker`
+    - `2023-01-19_Gina_lost_job_DoorDash`
+    - `2023-02-08_Gina_bought_new_fashion_piece`
+    - `Jon_dance_studio_preferences_natural_light_water_Marley_flooring`
+  - Title rules:
+    - make titles specific and retrieval-friendly
+    - include named entities and the event keyword
+    - include time in the title whenever the section gives time information
+    - avoid broad titles like `conversation_summary`, `life_updates`, or `Jon_Gina_business_conversation`
+  - Content rules:
+    - store the concrete fact in plain language
+    - preserve dates, numbers, names, reasons, and key properties
+    - do not replace exact facts with vague abstractions if the exact fact is present
+  - If a fact already exists and the new section refines it, update that memory entry instead of creating a duplicate.
+  - Never call `memory_list` before writing unless you need it to check or update an existing fact. Do not waste turns on empty global listing.
+
+  ### Tool Call Format
+  - Output tool calls in exactly this format and nothing else inside the block:
+  <tool_call>
+  { "name": "memory_add", "arguments": { "title": "2023-01-19_Jon_lost_job_banker", "content": "On 19 January 2023, Jon said he lost his job as a banker." } }
+  </tool_call>
+  - Each `<tool_call>` block must contain exactly one JSON object.
+  - The JSON object must have exactly two top-level keys: `name` and `arguments`.
+  - Do not add commentary before, after, or inside the JSON.
 
   <core_memory>
   {memory}
@@ -261,16 +295,57 @@ memory_prompt_default: |
   </section>
 
   **Important**:
+  - First emit any needed tool calls for external memory.
   - Final answer must be the updated concise core memory only (plain text, no tool syntax).
   - Max length: 1–3 sentences.
   - Focus only on WHAT the context is generally about, not details.
+  - Even if the final core memory is abstract, the external memory must retain detailed answerable facts.
 
   Updated concise core memory:
 
 final_prompt_default: |
   You are presented with a problem and a previous memory.
 
-  You have access to tools that can help you solve the problem. Use them if necessary. In particular, if you can't find the answer in the memory, you should use the **memory_list**, **memory_key_retrieve**, **memory_embedding_retrieve** and **memory_bm25_retrieve** tools to find relevant information. If you can not find the answer using one of these tools, you can also use other tools to help you. Try as hard as you can to find the answer using the tools available to you until you find the answer or you are sure that the answer is not in the memory or tools. Do not decide that the answer is not in the memory or tools unless you have used all relevant tools to search for the answer. Before you decided that the information is not available, check that you have used all relevant tools to search for the answer.
+  You have access only to the currently available memory tools. In this setting, rely on:
+  - `memory_list`
+  - `memory_key_retrieve`
+  - other currently available memory management tools only if they are actually present
+
+  Do NOT assume `memory_embedding_retrieve` or `memory_bm25_retrieve` exist.
+
+  Your goal is to answer strictly from memory evidence. Because only-memory retrieval is weak, you must search carefully before concluding the answer is unavailable.
+
+  ### Search Policy
+  - First inspect the previous memory if it already directly contains the answer.
+  - If not, use `memory_list` to search for candidate entries by targeted keywords.
+  - Use multiple focused searches instead of one broad search. Combine:
+    - person names
+    - event words
+    - object names
+    - date or time words
+    - location or organization names
+  - For time questions, explicitly search for titles or entries containing dates, months, years, or event names.
+  - For multiple-choice or negation questions, search for positive evidence first. Only answer "not mentioned" if you have searched the relevant entities/events and found no supporting memory.
+  - After `memory_list` returns candidate titles, use `memory_key_retrieve` on the most relevant entries before answering.
+  - Do not stop after retrieving one vague summary if the answer is still missing. Try narrower alternative searches.
+  - Do not use `memory_list(arguments={})` or other empty global searches unless the question truly requires scanning everything.
+
+  ### Answer Policy
+  - Base the final answer on retrieved memory evidence, not on guesswork.
+  - If the retrieved memory only supports a coarse time range, do not convert it into a precise date unless the date is explicitly stored.
+  - If the retrieved memory is only a high-level summary and does not contain the asked fact, continue searching instead of inventing a plausible answer.
+  - Only say the information is unavailable after you have exhausted relevant keyword searches and checked the best candidate entries.
+
+  ### Tool Call Format
+  - Use exact tool-call JSON format:
+  <tool_call>
+  { "name": "memory_list", "arguments": { "filter": "Jon lost job banker" } }
+  </tool_call>
+  <tool_call>
+  { "name": "memory_key_retrieve", "arguments": { "title": "2023-01-19_Jon_lost_job_banker" } }
+  </tool_call>
+  - Each `<tool_call>` block must contain exactly one JSON object with top-level keys `name` and `arguments`.
+  - Do not output malformed JSON or extra text inside a `<tool_call>` block.
 
   Please answer the problem based on the previous memory and the tools. Put your final answer in \\boxed{{}}.
 

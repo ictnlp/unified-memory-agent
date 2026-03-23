@@ -14,12 +14,12 @@ tools:
   - class_name: "verl.tools.memory.mem_tool.ListTool"
     config: 
       type: native
-  - class_name: "verl.tools.memory.mem_tool.RankBM25RetrievalTool"
-    config: 
-      type: native
-  - class_name: "verl.tools.memory.mem_tool.EmbeddingRetrievalTool"
-    config: 
-      type: native
+  # - class_name: "verl.tools.memory.mem_tool.RankBM25RetrievalTool"
+  #   config: 
+  #     type: native
+  # - class_name: "verl.tools.memory.mem_tool.EmbeddingRetrievalTool"
+  #   config: 
+  #     type: native
   # - class_name: "verl.tools.memory.mem_tool.FinalAnswerTool"
   #   config: 
   #     type: native
