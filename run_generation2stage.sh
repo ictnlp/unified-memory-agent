@@ -44,7 +44,8 @@ function kill_vllm_by_port() {
 #         --generate-only
 # done
 
-# vllm serve Qwen/Qwen3-4B-Instruct-2507 -dp 2 -tp 4 --gpu-memory-utilization 0.85 > vllm.log 2>&1 &
+# CUDA_VISIBLE_DEVICES=0,1,2,3 vllm serve /mnt/pfs-guan-ssai/nlu/zhangkehao/unified-memory-agent/external/verl/checkpoints/tool_memagent/qwen3-4b_stage1_memory/global_step_63/hf -tp 4 --gpu-memory-utilization 0.85 > vllm0.log 2>&1 &
+# CUDA_VISIBLE_DEVICES=4,5,6,7 vllm serve /mnt/pfs-guan-ssai/nlu/zhangkehao/unified-memory-agent/external/verl/checkpoints/tool_memagent/qwen3-4b_stage2_qa/global_step_63/hf -tp 4 --gpu-memory-utilization 0.85 --port 8001 > vllm1.log 2>&1 &
 # source external/infinity/libs/infinity_emb/.venv/bin/activate
 # infinity_emb v2 --model-id sentence-transformers/all-MiniLM-L6-v2 --port 8080 > infinity_emb.log 2>&1 &
 # source .venv/bin/activate
@@ -66,13 +67,23 @@ until curl -s http://localhost:8000/health > /dev/null 2>&1; do
         exit 1
     fi
 done
-# export USE_SMALL_VALSETS=1
-for TASK in locomo
+until curl -s http://localhost:8001/health > /dev/null 2>&1; do
+    sleep 2
+    echo "wait for server port 8001..."
+    if ! pgrep -f "vllm serve" > /dev/null; then
+        echo "Error: vllm process died. Check vllm1.log for details:"
+        cat vllm1.log
+        exit 1
+    fi
+done
+export VERL_QA_MODEL_NAME="/mnt/pfs-guan-ssai/nlu/zhangkehao/unified-memory-agent/external/verl/checkpoints/tool_memagent/qwen3-4b_stage2_qa/global_step_63/hf"
+for TASK in hotpotqa
 do
     python evaluate_async.py \
         --task $TASK \
         --agent toolmem \
-        --agent-id UMA_base \
+        --agent-id toolmem2stage \
+        --model /mnt/pfs-guan-ssai/nlu/zhangkehao/unified-memory-agent/external/verl/checkpoints/tool_memagent/qwen3-4b_stage1_memory/global_step_63/hf \
         --concurrency 10 \
         --output-dir results/qwen3-4b/$TASK \
         --generate-only

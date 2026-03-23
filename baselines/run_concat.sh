@@ -20,7 +20,7 @@ do
     python evaluate_async.py \
         --task $TASK \
         --agent concat \
-        --output_dir $RESULTS_DIR/$TASK \
-        --generate_only \
+        --output-dir $RESULTS_DIR/$TASK \
+        --generate-only \
         --force-overwrite
 done

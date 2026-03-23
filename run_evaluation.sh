@@ -62,10 +62,10 @@ do
         --task $TASK \
         --agent toolmem \
         --model $MODEL \
-        --agent_id $AGENT_ID \
+        --agent-id $AGENT_ID \
         --concurrency 10 \
-        --output_dir $RESULTS_DIR/$TASK \
-        --generate_only
+        --output-dir $RESULTS_DIR/$TASK \
+        --generate-only
 done
 
 # EVALUATION PHASE
@@ -85,8 +85,8 @@ do
         python evaluate_async.py \
             --task $TASK \
             --concurrency 256 \
-            --input_file "$INPUT_FILE" \
-            --output_dir "$OUTPUT_DIR" \
+            --input-file "$INPUT_FILE" \
+            --output-dir "$OUTPUT_DIR" \
             --force-overwrite
     fi
 done

@@ -17,8 +17,8 @@ do
     python evaluate_async.py \
         --task $TASK \
         --agent amem \
-        --output_dir $RESULTS_DIR/$TASK \
+        --output-dir $RESULTS_DIR/$TASK \
         --concurrency 10 \
-        --generate_only \
+        --generate-only \
         --force-overwrite
 done

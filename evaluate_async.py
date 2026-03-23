@@ -904,7 +904,13 @@ def get_args():
     parser = argparse.ArgumentParser(description='Memory Agent Evaluation - Async Version')
     parser.add_argument('--task', type=str, default='longmemeval')
     parser.add_argument('--agent', type=str, default='emergence')
-    parser.add_argument('--agent_id', type=str, default=None, help='Agent name for output files (default: agent type)')
+    parser.add_argument(
+        '--agent-id', '--agent_id',
+        dest='agent_id',
+        type=str,
+        default=None,
+        help='Agent name for output files (default: agent type)',
+    )
     default_agent_cfg_path = (
         Path(__file__).resolve().parent
         / 'external'
@@ -913,8 +919,13 @@ def get_args():
         / 'memalpha-qwen3-4b_agent_0.05-0.1.yaml'
     )
     default_agent_cfg = str(default_agent_cfg_path) if default_agent_cfg_path.exists() else None
-    parser.add_argument('--agent_config_path', type=str, default=default_agent_cfg,
-                        help='Optional agent configuration file (used by memalpha agent)')
+    parser.add_argument(
+        '--agent-config-path', '--agent_config_path',
+        dest='agent_config_path',
+        type=str,
+        default=default_agent_cfg,
+        help='Optional agent configuration file (used by memalpha agent)',
+    )
     default_prompts_cfg_path = (
         Path(__file__).resolve().parent
         / 'external'
@@ -923,19 +934,43 @@ def get_args():
         / 'prompts_wrt_datasource.yaml'
     )
     default_prompts_cfg = str(default_prompts_cfg_path) if default_prompts_cfg_path.exists() else None
-    parser.add_argument('--prompts_config_path', type=str, default=default_prompts_cfg,
-                        help='Optional prompts configuration file for memalpha agent')
-    parser.add_argument('--model', type=str, default='Qwen/Qwen3-4B-Instruct',
-                        help='Model name to use (default: Qwen/Qwen3-4B-Instruct)')
-    parser.add_argument('--input_file', type=str, default=None,
-                        help='Input file for evaluation only (JSONL format)')
-    parser.add_argument('--output_dir', type=str, default=None,
-                        help='Output directory (default: results/{task})')
+    parser.add_argument(
+        '--prompts-config-path', '--prompts_config_path',
+        dest='prompts_config_path',
+        type=str,
+        default=default_prompts_cfg,
+        help='Optional prompts configuration file for memalpha agent',
+    )
+    parser.add_argument('--model', type=str, default='Qwen/Qwen3-4B-Instruct-2507',
+                        help='Model name to use (default: Qwen/Qwen3-4B-Instruct-2507)')
+    parser.add_argument(
+        '--input-file', '--input_file',
+        dest='input_file',
+        type=str,
+        default=None,
+        help='Input file for evaluation only (JSONL format)',
+    )
+    parser.add_argument(
+        '--output-dir', '--output_dir',
+        dest='output_dir',
+        type=str,
+        default=None,
+        help='Output directory (default: results/{task})',
+    )
     parser.add_argument('--concurrency', type=int, default=50,
                         help='Number of concurrent tasks (default: 50)')
-    parser.add_argument('--generate-only', action='store_true', help='Generate Only mode')
-    parser.add_argument('--force-overwrite', action='store_true',
-                        help='Re-evaluate all responses and overwrite existing evaluated files')
+    parser.add_argument(
+        '--generate-only', '--generate_only',
+        dest='generate_only',
+        action='store_true',
+        help='Generate Only mode',
+    )
+    parser.add_argument(
+        '--force-overwrite', '--force_overwrite',
+        dest='force_overwrite',
+        action='store_true',
+        help='Re-evaluate all responses and overwrite existing evaluated files',
+    )
     return parser.parse_args()
 
 async def main():

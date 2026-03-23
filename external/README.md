@@ -103,7 +103,7 @@ python evaluate_async.py --task locomo --agent gam
 | Mem-alpha code | `external/memalpha/` | ✓ (via `agents/__init__.py`) |
 | MEM1 code | `external/mem1/` | ✓ (via `agents/__init__.py`) |
 | verl code | `external/verl/` | ✓ (via `agents/__init__.py`) |
-| Mem-alpha configs | `external/memalpha/config/` | ✓ (via `--agent_config_path`) |
+| Mem-alpha configs | `external/memalpha/config/` | ✓ (via `--agent-config-path`) |
 | Data files | See above | ✓ (via environment variables) |
 | verl checkpoints | **NOT included** | Copy separately if needed |
 

@@ -42,6 +42,6 @@ do
         --task $TASK \
         --agent mem1 \
         --model Mem-Lab/Qwen2.5-7B-RL-RAG-Q2-EM-Release \
-        --output_dir $RESULTS_DIR/$TASK \
-        --generate_only
+        --output-dir $RESULTS_DIR/$TASK \
+        --generate-only
 done

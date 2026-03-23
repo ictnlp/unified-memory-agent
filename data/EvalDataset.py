@@ -881,8 +881,13 @@ def load_msc(force_rebuild=False, batch_size=5):
 
 def load_from_path(path: str) -> list[EvalData]:
     """Load EvalData from a given JSON file path."""
+    original_path = Path(path)
     if os.environ.get("USE_SMALL_VALSETS") == "1":
-        path = path.replace("/", "/small_valsets/")
+        small_valset_path = original_path.parent / "small_valsets" / original_path.name
+        if not small_valset_path.exists():
+            from split_small_valset import ensure_small_valset
+            ensure_small_valset(original_path, expected_num_q=200)
+        path = str(small_valset_path)
     if not os.path.exists(path):
         raise FileNotFoundError(f"File not found: {path}")
     processed_dataset = json.load(open(path))

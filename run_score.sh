@@ -27,8 +27,8 @@ do
             python evaluate_async.py \
                 --task $TASK \
                 --concurrency 256 \
-                --input_file "$INPUT_FILE" \
-                --output_dir "$OUTPUT_DIR"
+                --input-file "$INPUT_FILE" \
+                --output-dir "$OUTPUT_DIR"
         fi
     done
 done

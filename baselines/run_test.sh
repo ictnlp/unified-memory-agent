@@ -20,7 +20,7 @@ do
         --task $TASK \
         --agent concat \
         --model Qwen/Qwen3.5-4B \
-        --output_dir $RESULTS_DIR/$TASK \
+        --output-dir $RESULTS_DIR/$TASK \
         --concurrency 1 \
         --generate-only
 done

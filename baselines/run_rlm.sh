@@ -17,7 +17,7 @@ do
     python evaluate_async.py \
         --task $TASK \
         --agent rlm \
-        --output_dir $RESULTS_DIR/$TASK \
+        --output-dir $RESULTS_DIR/$TASK \
         --concurrency 50 \
-        --generate_only
+        --generate-only
 done

@@ -31,6 +31,6 @@ do
     python evaluate_async.py \
         --task $TASK \
         --agent rag \
-        --output_dir $RESULTS_DIR/$TASK \
-        --generate_only
+        --output-dir $RESULTS_DIR/$TASK \
+        --generate-only
 done

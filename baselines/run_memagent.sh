@@ -16,8 +16,8 @@ do
     python evaluate_async.py \
         --task $TASK \
         --agent memagent \
-        --agent_id memagent7b \
-        --output_dir $RESULTS_DIR/$TASK \
+        --agent-id memagent7b \
+        --output-dir $RESULTS_DIR/$TASK \
         --model BytedTsinghua-SIA/RL-MemoryAgent-7B \
-        --generate_only
+        --generate-only
 done
