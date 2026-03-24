@@ -11,7 +11,7 @@ A comprehensive evaluation framework for testing memory-based conversational AI 
 Official implementation of **Unified Memory Agent**. See the associated paper on [arXiv](https://arxiv.org/abs/2602.18493).
 
 <p align="center">
-  <img src="./assets/mem.jpg" width="900" alt="Unified Memory Agent overview">
+  <img src="./assets/mem.svg" width="900" alt="Unified Memory Agent overview">
 </p>
 
 ## Table of Contents
@@ -211,7 +211,7 @@ bash run_score.sh
 ## Training
 
 <p align="center">
-  <img src="./assets/memrl.jpg" width="900" alt="Unified Memory Agent training overview">
+  <img src="./assets/memrl.svg" width="900" alt="Unified Memory Agent training overview">
 </p>
 
 ### Prepare Datasets
