@@ -2,9 +2,42 @@
 
 A comprehensive evaluation framework for testing memory-based conversational AI agents across multiple datasets and metrics.
 
-## Paper
+<p>
+  <a href="https://arxiv.org/abs/2602.18493"><img src="https://img.shields.io/badge/arXiv-2602.18493-b31b1b.svg" alt="arXiv"></a>
+  <a href="https://huggingface.co/datasets/YuWangX/Memalpha-full"><img src="https://img.shields.io/badge/Hugging%20Face-Memalpha--full-ffd21e?logo=huggingface&logoColor=black" alt="Hugging Face"></a>
+  <a href="https://github.com/ictnlp/unified-memory-agent"><img src="https://img.shields.io/badge/License-Apache%202.0-1677c5.svg" alt="License: Apache 2.0"></a>
+</p>
 
-[Unified Memory Agent (arXiv:2602.18493)](https://arxiv.org/abs/2602.18493)
+Official implementation of **Unified Memory Agent**. See the associated paper on [arXiv](https://arxiv.org/abs/2602.18493).
+
+<p align="center">
+  <img src="./assets/mem.jpg" width="900" alt="Unified Memory Agent overview">
+</p>
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Installation](#installation)
+  - [Prerequisites](#prerequisites)
+  - [Main Environment Setup](#main-environment-setup)
+  - [Embedding Service Setup (Required for all users)](#embedding-service-setup-required-for-all-users)
+  - [Environment Overview](#environment-overview)
+- [Quick Start](#quick-start)
+  - [Deploy Services](#deploy-services)
+  - [Run Demo](#run-demo)
+- [Test on Benchmarks](#test-on-benchmarks)
+  - [Download Evaluation Datasets](#download-evaluation-datasets)
+  - [Prepare Ledger-QA](#prepare-ledger-qa)
+  - [Running UMA](#running-uma)
+  - [Running Baselines](#running-baselines)
+  - [Supported Tasks & Agents](#supported-tasks--agents)
+  - [Output Files](#output-files)
+- [Training](#training)
+  - [Prepare Datasets](#prepare-datasets)
+  - [Deploy embedding model](#deploy-embedding-model)
+  - [Start Training](#start-training)
+- [Extending the System](#extending-the-system)
+  - [Adding New Agents](#adding-new-agents)
 
 ## Overview
 
@@ -176,6 +209,10 @@ bash run_score.sh
 - **Statistics**: Pretty-printed tables (console or text file)
 
 ## Training
+
+<p align="center">
+  <img src="./assets/memrl.jpg" width="900" alt="Unified Memory Agent training overview">
+</p>
 
 ### Prepare Datasets
 1. Memalpha-full
