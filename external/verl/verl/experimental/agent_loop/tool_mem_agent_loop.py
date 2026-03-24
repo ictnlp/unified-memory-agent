@@ -301,7 +301,12 @@ class ToolMemoryAgentLoop(AgentLoopBase):
         metrics = {}
         request_id = uuid4().hex
         memory_kwargs = kwargs.get("memory_kwargs", {})
-        self.retrieve_chunks = kwargs['tools_kwargs']['memory_bm25_retrieve']['create_kwargs']['chunks']
+        self.tools_kwargs = kwargs.get("tools_kwargs", {})
+        self.retrieve_chunks = (
+            self.tools_kwargs.get("memory_bm25_retrieve", {})
+            .get("create_kwargs", {})
+            .get("chunks", [])
+        )
         # Initialize context chunks from the prompt
         context_text = kwargs.get("context", "")
         if context_text:
@@ -659,6 +664,14 @@ class ToolMemoryAgentLoop(AgentLoopBase):
         
         agent_data.memory_content = response_text
 
+    def _build_tool_create_kwargs(self, tool_name: str, trajectory_id: str) -> dict[str, Any]:
+        create_kwargs = dict(self.tools_kwargs.get(tool_name, {}).get("create_kwargs", {}))
+        create_kwargs.setdefault("filename", "./tmp/verl_agent/memory_store.jsonl")
+        create_kwargs["trajectory_id"] = trajectory_id
+        if tool_name in {"memory_bm25_retrieve", "memory_embedding_retrieve"}:
+            create_kwargs.setdefault("chunks", self.retrieve_chunks)
+        return create_kwargs
+
     async def _call_tool(self, tool_call: FunctionCall, trajectory_id: str) -> ToolResponse:
         """Call tool and return tool response."""
         tool, instance_id = None, None
@@ -666,12 +679,7 @@ class ToolMemoryAgentLoop(AgentLoopBase):
             tool_name = tool_call.name
             tool_args = json.loads(tool_call.arguments)
             tool = self.tools[tool_name]
-            create_kwargs = {
-                'trajectory_id': trajectory_id,
-                'filename': './tmp/verl_agent/memory_store.jsonl'
-            }
-            if tool_name == "memory_bm25_retrieve" or tool_name == "memory_embedding_retrieve":
-                create_kwargs['chunks'] = self.retrieve_chunks
+            create_kwargs = self._build_tool_create_kwargs(tool_name, trajectory_id)
             instance_id, _ = await tool.create(create_kwargs=create_kwargs)
             tool_execution_response, tool_reward, res = await tool.execute(instance_id, tool_args)
         except Exception as e:

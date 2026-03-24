@@ -132,8 +132,6 @@ class VerlMemoryAgent(BaseAgent):
         self._tokenizer = AutoTokenizer.from_pretrained(self._resolved_model, fix_mistral_regex=True)
         self._config = self._build_config()
         ToolMemoryAgentLoop.init_class(self._config, self._tokenizer, None)
-        self._memory_dir = Path(PROJECT_ROOT / "tmp" / "verl_agent")
-        self._memory_dir.mkdir(parents=True, exist_ok=True)
         self._max_response_tokens = int(self._config.actor_rollout_ref.rollout.response_length)
         self._context_chunks: List[str] = []
         self.data_source = data_source
@@ -245,11 +243,17 @@ class VerlMemoryAgent(BaseAgent):
             self._context_chunks.extend(subchunks)
         self.raw_chunks.append(chunk)
 
+    def _create_run_output_dir(self) -> Path:
+        run_dir = PROJECT_ROOT / "tmp" / "intermediate_verl_outputs" / str(self.data_source) / str(self.agent_id) / uuid4().hex
+        run_dir.mkdir(parents=True, exist_ok=True)
+        return run_dir
 
     async def QA_batch_async(self, query_list: List[str], save_intermediate: bool = True) -> List[str]:
         if not query_list:
             return []
-        raw_result, outputs = await self._run_agent_loop(query_list)
+        run_dir = self._create_run_output_dir()
+        memory_store_path = run_dir / "memory_store.jsonl"
+        raw_result, outputs = await self._run_agent_loop(query_list, memory_store_path=memory_store_path)
         results = [str(resp).split("</tool_response>\nassistant")[-1].strip() for resp in raw_result]
         def try_remove_boxed(r: str) -> str:
             if not isinstance(r, str):
@@ -312,15 +316,14 @@ class VerlMemoryAgent(BaseAgent):
 
         intermediate_path = None
         if save_intermediate:
-            intermediate_path = Path(f"./tmp/intermediate_verl_outputs/{self.data_source}/{self.agent_id}/{uuid4().hex}")
-            intermediate_path.mkdir(parents=True, exist_ok=True)
+            intermediate_path = run_dir
             for i, output in enumerate(outputs):
                 filename = f"final_{i}.txt" if output.extra_fields["is_final"] else f"memory_{i}.txt"
                 with open(intermediate_path / filename, "w") as f:
                     f.write(self._tokenizer.decode(output.prompt_ids + output.response_ids))
         return results, intermediate_path, tool_call_stats
 
-    async def _run_agent_loop(self, queries: Sequence[str]) -> List[str]:
+    async def _run_agent_loop(self, queries: Sequence[str], memory_store_path: Path) -> List[str]:
         server_manager = ClientCompletionsServerManager(
             self.client,
             self._resolved_model,
@@ -341,8 +344,6 @@ class VerlMemoryAgent(BaseAgent):
             processor=None,
         )
 
-        # memory_store_path = self._memory_dir / f"memory_store_{uuid4().hex}.jsonl"
-        memory_store_path = self._memory_dir / f"memory_store.jsonl"
         sampling_params = {
             "temperature": 0.0,
             "max_tokens": self._max_response_tokens,
@@ -350,23 +351,16 @@ class VerlMemoryAgent(BaseAgent):
             # "stop": ["</tool_call>"],
         }
 
-        try:
-            outputs = await agent_loop.run(
-                sampling_params=sampling_params,
-                raw_prompt=[{"role": "user", "content": queries}],
-                context="\n".join(self._context_chunks),
-                memory_kwargs={"initial_memory": ""},
-                tools_kwargs=self._build_tool_kwargs(memory_store_path),
-                verbose=False,
-                data_source=self.data_source,
-                raw_chunks=self.raw_chunks if self.data_source == 'synth' else None,
-            )
-        finally:
-            if memory_store_path.exists():
-                try:
-                    memory_store_path.unlink()
-                except OSError:
-                    pass
+        outputs = await agent_loop.run(
+            sampling_params=sampling_params,
+            raw_prompt=[{"role": "user", "content": queries}],
+            context="\n".join(self._context_chunks),
+            memory_kwargs={"initial_memory": ""},
+            tools_kwargs=self._build_tool_kwargs(memory_store_path),
+            verbose=False,
+            data_source=self.data_source,
+            raw_chunks=self.raw_chunks if self.data_source == 'synth' else None,
+        )
 
         response_list: List[str] = []
         for output in outputs:

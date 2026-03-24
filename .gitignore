@@ -65,3 +65,5 @@ data/raw/longmemeval_s.json
 data/train/
 flash_attn*.whl*
 outputs/
+ANALYSIS.md
+prompt_results.tsv
