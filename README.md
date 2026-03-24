@@ -4,7 +4,7 @@ A comprehensive evaluation framework for testing memory-based conversational AI 
 
 <p>
   <a href="https://arxiv.org/abs/2602.18493"><img src="https://img.shields.io/badge/arXiv-2602.18493-b31b1b.svg" alt="arXiv"></a>
-  <a href="https://huggingface.co/datasets/YuWangX/Memalpha-full"><img src="https://img.shields.io/badge/Hugging%20Face-Memalpha--full-ffd21e?logo=huggingface&logoColor=black" alt="Hugging Face"></a>
+  <a href="https://huggingface.co/dp66/UMA-4B"><img src="https://img.shields.io/badge/Hugging%20Face-UMA--4B-ffd21e?logo=huggingface&logoColor=black" alt="Hugging Face"></a>
   <a href="https://github.com/ictnlp/unified-memory-agent"><img src="https://img.shields.io/badge/License-Apache%202.0-1677c5.svg" alt="License: Apache 2.0"></a>
 </p>
 
