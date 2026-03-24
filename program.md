@@ -18,9 +18,8 @@
 
 开始一轮新实验时，按下面流程初始化：
 
-1. 进入工作目录：
+1. 默认当前工作目录就是仓库根目录，只需要激活环境：
 ```bash
-cd /mnt/pfs-guan-ssai/nlu/zhangkehao/unified
 source ./.venv/bin/activate
 ```
 2. 读取以下文件以获得完整上下文：
