@@ -366,10 +366,9 @@ final_prompt_locomo: |
   - Questions starting with `According to X`, `Why does X`, `What does X think`, `What is important for X to believe`, `favorite`, or `perfect mentor and guide` are concrete fact questions, not vague summaries; search for the quoted opinion/preference anchors directly.
   - If the first search using `person + topic` fails, immediately try the answer-bearing phrase from the question, not just the topic noun.
   - If `person + anchor` searches fail, do not keep repeating the person prefix. Titles are often date-first or object-first, so you must also search the bare object noun, relation word, or action anchor by itself.
+  - For `what type/kind/use` or `how many X` questions, after the first miss on `person + object`, retry the concrete object noun with likely title-style variants such as singular/plural, device/platform names, or list/count forms. Do not stop after only `games`, `photos`, `pets`, or another single bare noun search.
   - For start / open / launch / accept / lose-job / promotion date questions, after one empty person-prefixed search you must try the shortest action token plus any exact named entity from the event, for example `lost`, `job`, `DoorDash`, `campaign`, `artist`, `internship`, `banker`.
   - If a spaced filter such as `Melanie running`, `Caroline workshop`, or `friend gift` returns empty, immediately retry the shortest single anchor token such as `running`, `workshop`, or `gift`, then an underscore variant if plausible. Do not stop on empty multiword filters.
-  - If the question asks about the kind, type, use, contents, or members of a concrete object or collection, search the concrete object noun directly, such as `books`, `photos`, `videos`, `classes`, `groups`, `pets`, `shoes`, or `camera`, not just vague words like `kind`, `type`, or `name`.
-  - For multiple-choice questions with a role, source, or owner constraint such as `chef`, `artist`, `friend`, `mother`, `team`, or `another artist`, treat that constraint as mandatory evidence. Similar events from a different source do not count.
 
   ### Retrieval Procedure
   1. Read `<memory>` and check whether it directly answers the question.
@@ -422,10 +421,9 @@ final_prompt_locomo: |
     - `journal used to track tasks and stay organized` -> `journal`, `bullet_journal`, `track_tasks`, `stay_organized`
     - `classes or groups joined for dogs` -> `classes`, `groups`, `course`, `agility`, `dog_owners_group`
     - `what helps stay connected to the creative process` -> `creative_process`, `world_events`, `documentaries`, `artists`
-    - `what type of music` -> `music`, genre words such as `rock`, `classic_rock`
-    - `what type of photos` -> `photos`, `camera`, scene words such as `sunsets`, `beaches`, `waves`
-    - `which type of cars` -> `cars`, `classic`, `vintage`
-    - `gift from another artist` -> `gift`, `artist`, and the exact role/source word, not just `gift`
+    - `what type of game / what games were played` -> `game`, `games`, `gaming`, `tournament`, exact genre/title/device anchors such as `adventure`, `RPG`, `Fortnite`, `Overwatch`, `Apex`
+    - `what mediums does he use to play games` -> `Gamecube`, `Playstation`, `PC`, `console`, `gaming`
+    - `how many hikes / letters / games / pets` -> try both singular and plural anchors such as `hike` and `hikes`, `letter` and `letters`, `game` and `games`, `pet` and `pets`, then `count` if needed
     - `same football team` -> each person's team name, `Liverpool`, `Manchester_City`, `favorite_team`
     - `US holiday around car accident` -> `car_accident`, named holiday such as `Independence_Day`, `Fourth_of_July`
   - Prefer both spaced and underscored variants when useful, for example `networking event` and `networking_event`.
@@ -448,7 +446,7 @@ final_prompt_locomo: |
   ### Question-Specific Search Strategy
   - For who/what questions:
     - search person + object/event anchor
-    - if the question asks `what kind/type of X`, `what are X used for`, `what does X contain`, or `what photos/videos/books/cars/music` someone has, search the concrete object noun first, not the vague slot word
+    - for `what type/kind/use of X` questions, if the first search misses, retry the concrete object noun with a likely genre/device/title anchor instead of stopping at one generic noun
     - search the shortest exact event anchor by itself
     - for workshop, conference, meeting, group, class, running, and book questions, search the bare event noun immediately after the first miss
     - if a compound anchor misses, retry with its shorter head word or base form
@@ -498,10 +496,10 @@ final_prompt_locomo: |
     - prefer evidence search for the underlying fact rather than searching `yes`, `no`, `love`, `like`
     - for comparison questions, search both entities separately and retrieve evidence for each side before answering
     - retrieve at least one supporting entry before answering
-  - For multiple-choice questions, especially ones with a `Not mentioned` option:
-    - search the person plus the asked object/event first
-    - also search the exact role/source discriminator from the question, such as `chef`, `artist`, `friend`, `boss`, or `team`
-    - only choose a positive option if retrieved evidence matches both the asked fact and that discriminator; nearby evidence about a different person, role, or source is not enough
+  - For count questions:
+    - search person + counted item noun first
+    - if that misses, retry singular/plural counted-item variants before `count`
+    - retrieve a list-bearing or count-bearing entry before answering
   - For city/place questions:
     - search person + travel/place anchor
     - then search the concrete place names or aliases directly, for example `Seattle`, `NYC`, `New_York_City`, `Paris`
@@ -515,7 +513,6 @@ final_prompt_locomo: |
   ### Answer Policy
   - Base the answer only on retrieved evidence.
   - Combine multiple retrieved entries when needed.
-  - Match the answer to the requested constraint: if the question asks for a type/category/use, answer that type/category/use rather than one example name; if the question includes a role/source constraint, do not answer from evidence that matches only the broad event.
   - Keep the final answer concise and direct.
   - Final answer must be only `\boxed{...}`.
   - Do not output explanatory prose before the boxed answer.

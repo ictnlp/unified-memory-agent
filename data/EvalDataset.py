@@ -1155,4 +1155,7 @@ AVAILABLE_BENCHMARKS = sorted(BENCHMARK_REGISTRY)
 print(f"[EvalDataset] Registered benchmarks: {', '.join(AVAILABLE_BENCHMARKS)}")
 
 if __name__ == '__main__':
-    load_hotpotqa()
+    load_synth("ss2")
+    load_synth("ss5")
+    load_synth("ss10")
+    load_synth("ss10_train")

@@ -35,12 +35,8 @@ CONSUMPTION_SCENES = {
 
 DEFAULT_MODEL = "gemini-3-pro-preview"
 API_CONFIG = {
-    "base_url": os.getenv("REMOTE_API_BASE", "http://localhost:8000/v1"),
-    "api_key": "sk-EMPTY",
-    "default_headers": {
-        "BCS-APIHub-RequestId": str(uuid.uuid4()),
-        "X-CHJ-GWToken": os.getenv("X_CHJ_GWTOKEN"),
-    },
+    "base_url": os.getenv("OPENAI_API_BASE", "http://localhost:8000/v1"),
+    "api_key": os.getenv("OPENAI_API_KEY", "EMPTY"),
     "max_retries": 100
 }
 

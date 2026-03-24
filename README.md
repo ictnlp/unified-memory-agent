@@ -2,6 +2,10 @@
 
 A comprehensive evaluation framework for testing memory-based conversational AI agents across multiple datasets and metrics.
 
+## Paper
+
+[Unified Memory Agent (arXiv:2602.18493)](https://arxiv.org/abs/2602.18493)
+
 ## Overview
 
 This system evaluates how well AI agents can answer questions based on accumulated conversational memory over time. It supports several benchmark datasets.
