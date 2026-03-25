@@ -1,10 +1,10 @@
 # locomo prompt experiment
 
-这是一个让 Codex 自动迭代 `locomo` 上 agent prompt 的实验。目标不是改代码逻辑，而是只通过修改 `prompt_template.yaml` 来提升 `llm_score` 对应的准确率。
+这是一个让 agent 自动迭代 `locomo` 上 agent prompt 的实验。目标不是改代码逻辑，而是只通过修改 `prompt_template.yaml` 来提升 `llm_score` 对应的准确率。
 
-这是一个长时间运行的自治任务，但当前采用“外层脚本循环重启 Codex，会话内只做一个 step”的执行方式。也就是说，整体任务会持续很久，但单次 Codex 会话不需要无限循环。
+这是一个长时间运行的自治任务，但当前采用“外层脚本循环重启 agent，会话内只做一个 step”的执行方式。也就是说，整体任务会持续很久，但单次 agent 会话不需要无限循环。
 
-`start_codex.sh` 会在外层反复拉起新的 Codex 会话，因此你在单次会话中的职责是：完成一个最小完整工作单元，然后退出，让下一次会话从归档状态继续。
+外层启动脚本会反复拉起新的 agent 会话，因此你在单次会话中的职责是：完成一个最小完整工作单元，然后退出，让下一次会话从归档状态继续。
 
 执行要求：
 
@@ -140,7 +140,7 @@ run_id	parent_run	accuracy	status	description
 
 先判断这是首次运行还是继续运行。
 
-注意：下面描述的是“单次 Codex 会话应完成的一个 step”，不是会话内无限循环。整体循环由外层 `start_codex.sh` 负责。
+注意：下面描述的是“单次 agent 会话应完成的一个 step”，不是会话内无限循环。整体循环由外层启动脚本负责。
 
 ### 首次运行
 
@@ -198,38 +198,43 @@ cp "tmp/prompt_runs/<best_run>/prompt_template.yaml" "$PROMPT_FILE"
 ```bash
 cp "tmp/prompt_runs/<best_run>/prompt_template.yaml" "$PROMPT_FILE"
 ```
-2. 分析 `analysis_target_run` 的 bad case、评测结果和 `intermediate_paths` 对应的中间文件。
-3. 形成或更新 `ANALYSIS.md`。文档中必须同时写清楚：
+2. 先查看 `prompt_results.tsv` 中以当前 `best_run` 为工作底稿、且状态为 `discard` 或 `crash` 的历史尝试，必要时阅读这些运行目录里的 `ANALYSIS.md` 和 prompt 快照。
+3. 总结这些失败尝试的共同模式，避免重复本质相同的失败改动。
+   - 不要只是换个说法，重复已经失败过的同类 prompt 方向
+   - 只有在有明确新证据、且改动更小或更直接时，才允许重新尝试相近方向
+4. 分析 `analysis_target_run` 的 bad case、评测结果和 `intermediate_paths` 对应的中间文件。
+5. 形成或更新 `ANALYSIS.md`。文档中必须同时写清楚：
    - `Current best run`
    - `Latest analyzed run`
    - `Observed issues in latest run`
+   - `Repeated failed directions to avoid`
    - `What to keep from best`
    - `What to borrow or reject from latest`
    - `Planned delta for next prompt`
-4. 如果 `latest_run == best_run`，则分析对象和工作底稿天然一致，直接从当前 best 继续改。
-5. 如果 `latest_run != best_run`，则执行固定策略：`analyze latest, edit from best`。
+6. 如果 `latest_run == best_run`，则分析对象和工作底稿天然一致，直接从当前 best 继续改。
+7. 如果 `latest_run != best_run`，则执行固定策略：`analyze latest, edit from best`。
    - 分析对象仍然是 `latest_run`
    - 工作底稿仍然是 `best_run`
    - 实际改动方式是：只把 `latest_run` 中看起来有价值的局部想法吸收到 `best_run` prompt 中
-6. 明确禁止两种模糊行为：
+8. 明确禁止两种模糊行为：
    - 不要“分析 latest，但直接在 latest prompt 上继续改”
    - 不要“恢复 best 后，完全忽略 latest 的失败信号”
-7. 只修改 prompt 文件，不要改其它文件。
-8. 生成新的 `run_id`，运行生成和评测。
-9. 将本轮 `ANALYSIS.md`、prompt 快照和结果文件移动到 `tmp/prompt_runs/<RUN_ID>/`。
-10. 统计准确率，记录到 `prompt_results.tsv`。
-11. 如果分数优于当前最优版本，则：
+9. 只修改 prompt 文件，不要改其它文件。
+10. 生成新的 `run_id`，运行生成和评测。
+11. 将本轮 `ANALYSIS.md`、prompt 快照和结果文件移动到 `tmp/prompt_runs/<RUN_ID>/`。
+12. 统计准确率，记录到 `prompt_results.tsv`。
+13. 如果分数优于当前最优版本，则：
    - 将该轮记为 `keep`
    - 用当前 `run_id` 更新 `best_run.txt`
-12. 如果分数持平或更差，则：
+14. 如果分数持平或更差，则：
    - 将该轮记为 `discard`
    - 不需要在本次会话中继续下一轮；下次会话开始时会再次从 `best_run.txt` 恢复
-13. 如果运行失败、输出缺失或评测崩溃，则记为 `crash`，准确率填 `0.0000`。失败分析仍然可以参考 `latest_run`，但下次会话开始时依旧从 `best_run` 恢复。
-14. 记录完成后，本次会话结束。外层脚本会启动下一次会话。
+15. 如果运行失败、输出缺失或评测崩溃，则记为 `crash`，准确率填 `0.0000`。失败分析仍然可以参考 `latest_run`，但下次会话开始时依旧从 `best_run` 恢复。
+16. 记录完成后，本次会话结束。外层脚本会启动下一次会话。
 
 ### 何时退出本次会话
 
-以下情况都可以结束当前这次 Codex 会话：
+以下情况都可以结束当前这次 agent 会话：
 
 - 已完成一个完整 step，并且已经归档和记录结果
 - 缺少必要输入文件，且无法从现有归档恢复
