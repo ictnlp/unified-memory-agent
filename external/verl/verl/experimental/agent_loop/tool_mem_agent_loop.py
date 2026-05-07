@@ -281,6 +281,7 @@ class ToolMemoryAgentLoop(AgentLoopBase):
         cls.apply_chat_template_kwargs = config.data.get("apply_chat_template_kwargs", {})
         cls.prompt_length = config.actor_rollout_ref.rollout.prompt_length
         cls.response_length = config.actor_rollout_ref.rollout.response_length
+        cls.memory_store_filename = os.environ.get("VERL_MEMORY_STORE_FILENAME", "./tmp/verl_agent/memory_store.jsonl")
         cls.system_prompt = tokenizer.apply_chat_template(
             [{}], add_generation_prompt=False, tokenize=True, **cls.apply_chat_template_kwargs
         )
@@ -313,7 +314,7 @@ class ToolMemoryAgentLoop(AgentLoopBase):
             # Split context into chunks
             if kwargs.get('raw_chunks') is not None:
                 context_chunks = kwargs['raw_chunks']
-            elif data_source == 'synth':
+            elif data_source == 'synth' and False:
                 context_chunks = self.retrieve_chunks
             else:
                 chunk_size = self.max_chunk_size
@@ -436,6 +437,20 @@ class ToolMemoryAgentLoop(AgentLoopBase):
         max_new_tokens = min(self.response_length, max_model_len - len(agent_data.current_prompt_ids) - 1)
         if max_new_tokens <= 0:
             print(f"ERROR: Current len(agent_data.current_prompt_ids)={len(agent_data.current_prompt_ids)} exceeds model max length {max_model_len}")
+        sampling_max_tokens = int(sampling_params.get("max_tokens", self.response_length))
+        if len(agent_data.current_prompt_ids) + sampling_max_tokens > max_model_len:
+            print(
+                "[ToolMemoryAgentLoop] prompt/token budget may exceed model window: "
+                f"phase={phase}, request_id={agent_data.request_id}, "
+                f"chunk_idx={agent_data.current_chunk_idx}, "
+                f"prompt_tokens={len(agent_data.current_prompt_ids)}, "
+                f"sampling_max_tokens={sampling_max_tokens}, "
+                f"computed_max_new_tokens={max_new_tokens}, "
+                f"prompt_length={self.prompt_length}, response_length={self.response_length}, "
+                f"max_model_len={max_model_len}, "
+                f"total={len(agent_data.current_prompt_ids) + sampling_max_tokens}",
+                flush=True,
+            )
         with simple_timer("generate_sequences", agent_data.metrics):
             # 走的async_sglang_server.py
             if phase == "qa" and self.server_manager_qa is not None:
@@ -600,19 +615,33 @@ class ToolMemoryAgentLoop(AgentLoopBase):
         #         self.tokenizer.encode, agent_instruction, add_special_tokens=False
         #     )
         #     response_ids = prefix_response_ids + middle_prompt_ids + suffix_response_ids
-        if len(agent_data.current_response_ids) + len(response_ids) > self.response_length - 200:
-            prefix_response_ids = response_ids[: self.response_length - len(agent_data.current_response_ids) - 200 + 5]
+        response_budget = self.response_length - len(agent_data.current_response_ids) - 200
+        prompt_budget = self.prompt_length - len(agent_data.current_prompt_ids) - 200
+        tool_response_budget = min(response_budget, prompt_budget)
+        if tool_response_budget < len(response_ids):
             middle_prompt_ids = await asyncio.to_thread(
-                self.tokenizer.encode, 
-                "...(tool response truncated)...\nNo more tools can be called due to response length limit. Please give the final response without calling any more tools. ", 
+                self.tokenizer.encode,
+                "...(tool response truncated)...\nNo more tools can be called due to response length limit. Please give the final response without calling any more tools. ",
                 add_special_tokens=False
             )
             suffix_response_ids = response_ids[-5:] # generation_prompt是最后5个token，需要保留
             append_prompt_ids = await asyncio.to_thread(
-                self.tokenizer.encode, 
-                "Due to the token limit, I need to provide my final response now without calling any more tools. ", 
+                self.tokenizer.encode,
+                "Due to the token limit, I need to provide my final response now without calling any more tools. ",
                 add_special_tokens=False
             )
+            fixed_suffix_len = len(middle_prompt_ids) + len(suffix_response_ids) + len(append_prompt_ids)
+            prefix_budget = max(tool_response_budget - fixed_suffix_len, 0)
+            print(
+                "[ToolMemoryAgentLoop] truncating tool responses before next generation: "
+                f"current_prompt_tokens={len(agent_data.current_prompt_ids)}, "
+                f"new_tool_response_tokens={len(response_ids)}, "
+                f"prompt_length={self.prompt_length}, response_length={self.response_length}, "
+                f"response_budget={response_budget}, prompt_budget={prompt_budget}, "
+                f"fixed_suffix_tokens={fixed_suffix_len}, kept_prefix_tokens={prefix_budget}",
+                flush=True,
+            )
+            prefix_response_ids = response_ids[:prefix_budget]
             response_ids = prefix_response_ids + middle_prompt_ids + suffix_response_ids + append_prompt_ids
         if self.max_assistant_turns and agent_data.assistant_turns >= self.max_assistant_turns:
             add_prompt = "\nNo more tools can be called due to assistant turn limit. Please give the final response without calling any more tools."

@@ -51,7 +51,23 @@ class ClientCompletionsServerManager:
         max_tokens = int(sampling_params.get("max_tokens", 4096))
         temperature = float(sampling_params.get("temperature", 0.0))
         stop = sampling_params.get("stop", None)
-        response = await self._create_completion(prompt_text, max_tokens, temperature, stop=stop)
+        try:
+            response = await self._create_completion(prompt_text, max_tokens, temperature, stop=stop)
+        except Exception as exc:
+            print(
+                "[VerlMemoryAgent] completion request failed: "
+                f"request_id={request_id}, prompt_tokens={len(prompt_ids)}, "
+                f"max_tokens={max_tokens}, total_budget={len(prompt_ids) + max_tokens}, "
+                f"model={self._model_name}, error={exc}",
+                flush=True,
+            )
+            print(
+                "[VerlMemoryAgent] failed prompt text begin\n"
+                f"{prompt_text}\n"
+                "[VerlMemoryAgent] failed prompt text end",
+                flush=True,
+            )
+            raise
         self.calls += 1
 
         choice = response[0]
@@ -211,19 +227,36 @@ class VerlMemoryAgent(BaseAgent):
     def _build_config(self):
         tool_config_default = VERL_ROOT / "memagent" / "tool_config.yaml"
         tool_config_path = Path(tool_config_default)
+        params = {
+            '8k': {
+                'prompt_length': 4096,
+                'response_length': 4096,
+                'max_chunk_size': 7500,
+            },
+            '16k': {
+                'prompt_length': 8192,
+                'response_length': 8192,
+                'max_chunk_size': 15000,
+            },
+            '32k': {
+                'prompt_length': 16384,
+                'response_length': 16384,
+                'max_chunk_size': 30000,
+            },
+        }['16k']
         config_dict = {
             "actor_rollout_ref": {
                 "rollout": {
-                    "prompt_length": 8192,
-                    "response_length": 8192,
+                    "prompt_length": params["prompt_length"],
+                    "response_length": params["response_length"],
                     "multi_turn": {
                         "max_assistant_turns": 100,
                         "max_parallel_calls": 100,
-                        "max_tool_response_length": 8192,
+                        "max_tool_response_length": params["response_length"],
                         "tool_response_truncate_side": "left",
                         "tool_config_path": str(tool_config_path),
                         "format": "hermes",
-                        "max_chunk_size": 15000,
+                        "max_chunk_size": params["max_chunk_size"],
                     },
                 },
             },

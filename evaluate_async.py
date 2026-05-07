@@ -32,6 +32,7 @@ from config import DATASET_LOADERS, AGENT_CLASS, API_CONFIG_LOCAL, API_CONFIG_RE
 if 'OPENAI_API_BASE' in os.environ:
     API_CONFIG_LOCAL['base_url'] = os.environ['OPENAI_API_BASE']
 
+JUDGE_API_BASE = os.environ.get("JUDGE_API_BASE") or os.environ.get("JUDGE_OPENAI_API_BASE")
 JUDGE_MODEL_NAME = "Qwen/Qwen3-30B-A3B-Instruct-2507"
 
 class BaseEvaluator:
@@ -55,7 +56,11 @@ class BaseEvaluator:
         response = await self.scoring_client.chat.completions.create(
             model=model_name, messages=messages, temperature=0, max_tokens=2048
         )
+        if not response.choices:
+            raise ValueError(f"judge response has no choices: {response}")
         content = response.choices[0].message.content
+        if content is None:
+            raise ValueError(f"judge response content is None: {response}")
         if "</think>" in content:
             content = content.split("</think>")[-1].strip()
         return content
@@ -477,7 +482,11 @@ def create_sync_client():
 
 def create_judge_client():
     """Create AsyncOpenAI client for judging"""
-    return AsyncOpenAI(**API_CONFIG_LOCAL)
+    judge_config = API_CONFIG_LOCAL.copy()
+    if JUDGE_API_BASE:
+        judge_config["base_url"] = JUDGE_API_BASE
+    print(f"Using judge API base: {judge_config['base_url']}")
+    return AsyncOpenAI(**judge_config)
 
 def load_dataset(task: str, force_rebuild: bool = False):
     """Load dataset for given task"""
@@ -959,6 +968,8 @@ def get_args():
     )
     parser.add_argument('--concurrency', type=int, default=50,
                         help='Number of concurrent tasks (default: 50)')
+    parser.add_argument('--judge-api-base', type=str, default=None,
+                        help='OpenAI-compatible API base URL for the judge model')
     parser.add_argument(
         '--generate-only', '--generate_only',
         dest='generate_only',
@@ -974,7 +985,10 @@ def get_args():
     return parser.parse_args()
 
 async def main():
+    global JUDGE_API_BASE
     args = get_args()
+    if args.judge_api_base:
+        JUDGE_API_BASE = args.judge_api_base
     if args.agent_id is None:
         args.agent_id = args.agent
     # Increase thread pool size for high concurrency
