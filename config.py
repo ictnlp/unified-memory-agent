@@ -69,6 +69,7 @@ class AgentRegistry:
         'gam': ('agents.gam_agent', 'GAMAgent'),
         'rlm': ('agents.rlm_agent', 'RLMAgent'),
         'amem': ('agents.amem_agent', 'AmemAgent'),
+        'memt': ('agents.memt_agent', 'MemTAgent'),
     }
 
     def __init__(self) -> None:
