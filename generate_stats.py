@@ -193,9 +193,9 @@ def calculate_task_statistics(agent_results, task):
             if task == 'convomem' and category != 'user_evidence':
                 continue
             # if task == 'locomo' and category == 5:
+            # #     continue
+            # if task.startswith('synth') and not (category == 'max_scene' or category == 'single_date_scene_amount' or category == 'time_range_multiple_scenes_amount'):
             #     continue
-            if task.startswith('synth') and not (category == 'max_scene' or category == 'single_date_scene_amount' or category == 'time_range_multiple_scenes_amount'):
-                continue
             
             # Collect all numeric metrics
             for metric_name, value in metrics.items():
@@ -467,10 +467,23 @@ def extract_session_count(task_name: str) -> Optional[int]:
 
 
 def sort_summary_tasks(tasks: List[str]) -> List[str]:
-    """Sort tasks using a preferred benchmark order, then append any remaining tasks."""
+    """Sort summary columns, with synth-ss tasks ordered by session count."""
     unique_tasks = list(dict.fromkeys(tasks))
-    preferred_tasks = [task for task in PREFERRED_SUMMARY_TASK_ORDER if task in unique_tasks]
-    remaining_tasks = sorted(task for task in unique_tasks if task not in PREFERRED_SUMMARY_TASK_ORDER)
+    synth_tasks = sorted(
+        [task for task in unique_tasks if extract_session_count(task) is not None],
+        key=lambda task: (extract_session_count(task), task)
+    )
+    preferred_tasks = [
+        task for task in PREFERRED_SUMMARY_TASK_ORDER
+        if task in unique_tasks and task not in synth_tasks
+    ]
+    remaining_tasks = sorted(
+        task for task in unique_tasks
+        if task not in preferred_tasks and task not in synth_tasks
+    )
+
+    if synth_tasks:
+        return synth_tasks + preferred_tasks + remaining_tasks
     return preferred_tasks + remaining_tasks
 
 
@@ -512,7 +525,7 @@ def plot_session_scaling(summary_scores: Dict[str, Dict[str, float]],
     # Agent name mapping for display
     name_map = {
         'concat16k': 'Concat',
-        'rag16k': 'RAG(k=20)',
+        'rag16k': 'RAG',
         'memagent': 'MemAgent',
         'memagent_woq': 'MemAgent-woq',
         'mem1': 'Mem1',
