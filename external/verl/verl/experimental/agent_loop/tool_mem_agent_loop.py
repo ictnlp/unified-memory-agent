@@ -617,7 +617,11 @@ class ToolMemoryAgentLoop(AgentLoopBase):
         #     response_ids = prefix_response_ids + middle_prompt_ids + suffix_response_ids
         response_budget = self.response_length - len(agent_data.current_response_ids) - 200
         prompt_budget = self.prompt_length - len(agent_data.current_prompt_ids) - 200
-        tool_response_budget = min(response_budget, prompt_budget)
+        # current_prompt_ids is the full next-generation context, not just the
+        # original prompt. Bound tool responses by the model window as well as
+        # by the stored response tensor length.
+        model_context_budget = self.prompt_length + self.response_length - len(agent_data.current_prompt_ids) - 200
+        tool_response_budget = min(response_budget, model_context_budget)
         if tool_response_budget < len(response_ids):
             middle_prompt_ids = await asyncio.to_thread(
                 self.tokenizer.encode,
@@ -633,11 +637,11 @@ class ToolMemoryAgentLoop(AgentLoopBase):
             fixed_suffix_len = len(middle_prompt_ids) + len(suffix_response_ids) + len(append_prompt_ids)
             prefix_budget = max(tool_response_budget - fixed_suffix_len, 0)
             print(
-                "[ToolMemoryAgentLoop] truncating tool responses before next generation: "
+                "[UMAToolMemoryAgentLoop] truncating tool responses before next generation: "
                 f"current_prompt_tokens={len(agent_data.current_prompt_ids)}, "
                 f"new_tool_response_tokens={len(response_ids)}, "
                 f"prompt_length={self.prompt_length}, response_length={self.response_length}, "
-                f"response_budget={response_budget}, prompt_budget={prompt_budget}, "
+                f"response_budget={response_budget}, model_context_budget={model_context_budget}, "
                 f"fixed_suffix_tokens={fixed_suffix_len}, kept_prefix_tokens={prefix_budget}",
                 flush=True,
             )
