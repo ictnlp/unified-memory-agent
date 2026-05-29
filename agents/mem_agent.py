@@ -16,7 +16,7 @@ class MemAgent(BaseAgent):
     """
     
     # Templates for memory updates
-    MEMORY_UPDATE_TEMPLATE = """You are presented with a problem, a section of an article that may contain the answer to the problem, and a previous memory. Please read the provided section carefully and update the memory with the new information that helps to answer the problem. Be sure to retain all relevant details from the previous memory while adding any new, useful information.
+    MEMORY_UPDATE_TEMPLATE = """You are presented with a problem, a section of an article that may contain the answer, and a previous memory. Please read the section carefully and update the memory with new information that helps to answer the problem, while retaining all relevant details from the previous memory.
 
 <problem> 
 {prompt}
