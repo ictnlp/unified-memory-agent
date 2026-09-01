@@ -3,12 +3,13 @@
 A comprehensive evaluation framework for testing memory-based conversational AI agents across multiple datasets and metrics.
 
 <p>
+  <a href="https://openreview.net/forum?id=lIMwj3O9a7"><img src="https://img.shields.io/badge/EMNLP%202026-Main%20Conference-2ea44f.svg" alt="EMNLP 2026 Main Conference"></a>
   <a href="https://arxiv.org/abs/2602.18493"><img src="https://img.shields.io/badge/arXiv-2602.18493-b31b1b.svg" alt="arXiv"></a>
   <a href="https://huggingface.co/dp66/UMA-4B"><img src="https://img.shields.io/badge/Hugging%20Face-UMA--4B-ffd21e?logo=huggingface&logoColor=black" alt="Hugging Face"></a>
   <a href="https://github.com/ictnlp/unified-memory-agent"><img src="https://img.shields.io/badge/License-Apache%202.0-1677c5.svg" alt="License: Apache 2.0"></a>
 </p>
 
-Official implementation of **Unified Memory Agent**. See the associated paper on [arXiv](https://arxiv.org/abs/2602.18493).
+Official implementation of **Unified Memory Agent**, accepted to the **EMNLP 2026 Main Conference**. See the paper on [OpenReview](https://openreview.net/forum?id=lIMwj3O9a7) or [arXiv](https://arxiv.org/abs/2602.18493).
 
 <p align="center">
   <img src="./assets/mem.svg" width="900" alt="Unified Memory Agent overview">
